@@ -229,6 +229,317 @@ body {
   padding: 0 1.4rem;
 }
 
+/* ---------- bitcoin pill ---------- */
+#btc-pill {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+  color: rgba(226, 243, 241, 0.92);
+  background: rgba(7, 20, 23, 0.6);
+  border: 1px solid rgba(69, 200, 192, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #555;
+}
+.pill-dot.green {
+  background: var(--hl-signal);
+  box-shadow: 0 0 8px rgba(110, 242, 163, 0.8);
+}
+.pill-dot.yellow {
+  background: #e8c35a;
+  box-shadow: 0 0 8px rgba(232, 195, 90, 0.7);
+}
+.pill-dot.red {
+  background: #e05a4e;
+  box-shadow: 0 0 8px rgba(224, 90, 78, 0.7);
+}
+
+/* ---------- toasts ---------- */
+#toast-host {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+#toast-host[data-mode='frame'] {
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+#toast-host[data-mode='drive'] {
+  bottom: 18px;
+  right: 18px;
+  align-items: flex-end;
+}
+.toast {
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: rgba(228, 244, 242, 0.95);
+  background: rgba(8, 22, 26, 0.66);
+  border: 1px solid rgba(83, 224, 210, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s ease;
+}
+.toast.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------- debug panel ---------- */
+#debug-panel {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  bottom: 14px;
+  z-index: 60;
+  width: min(390px, 92vw);
+  overflow-y: auto;
+  border-radius: 14px;
+  padding: 14px 16px 18px;
+  color: #cfe6e3;
+  font-size: 11.5px;
+  background: rgba(6, 16, 19, 0.82);
+  border: 1px solid rgba(69, 200, 192, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+}
+#debug-panel header {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+#debug-panel header i {
+  font-style: normal;
+  opacity: 0.6;
+  font-weight: 400;
+}
+#debug-panel h4 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 14px 0 7px;
+  font-weight: 600;
+}
+#debug-panel h4 b {
+  color: #fff;
+  font-size: 13px;
+}
+#debug-panel h4 em {
+  font-style: normal;
+  opacity: 0.75;
+}
+.dbg-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.dbg-tile {
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dbg-tile span {
+  opacity: 0.55;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.dbg-tile b {
+  font-size: 12px;
+  font-weight: 600;
+}
+.dbg-tile.pos b {
+  color: #7fe0a8;
+}
+.dbg-tile.neg b {
+  color: #ef8f84;
+}
+.dbg-bar {
+  display: grid;
+  grid-template-columns: 108px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+.dbg-bar span {
+  opacity: 0.7;
+}
+.dbg-bar .track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.dbg-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #2f8f88, #53e0d2);
+}
+.dbg-bar i {
+  font-style: normal;
+  text-align: right;
+  opacity: 0.8;
+}
+.dbg-feed {
+  display: grid;
+  grid-template-columns: 12px 82px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.dbg-feed .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #666;
+}
+.dbg-feed .dot.ok {
+  background: var(--hl-signal);
+}
+.dbg-feed .dot.stale,
+.dbg-feed .dot.connecting {
+  background: #e8c35a;
+}
+.dbg-feed .dot.error,
+.dbg-feed .dot.offline {
+  background: #e05a4e;
+}
+.dbg-feed i {
+  font-style: normal;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dbg-feed b {
+  text-align: right;
+  opacity: 0.85;
+  font-weight: 500;
+}
+.dbg-actions div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.dbg-actions button {
+  font: inherit;
+  font-size: 11px;
+  color: #d6efec;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(83, 224, 210, 0.25);
+  background: rgba(83, 224, 210, 0.08);
+  cursor: pointer;
+}
+.dbg-actions button:hover {
+  background: rgba(83, 224, 210, 0.2);
+}
+
+/* ---------- legend ---------- */
+#legend-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(500px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 20px 24px 24px;
+  color: #d5eae7;
+  font-size: 13px;
+  line-height: 1.65;
+  background: rgba(6, 16, 19, 0.86);
+  border: 1px solid rgba(69, 200, 192, 0.16);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+#legend-panel header {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+}
+#legend-panel h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 14px 0 4px;
+}
+#legend-panel ul {
+  padding-left: 18px;
+}
+.legend-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.legend-tiers span {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.legend-tiers .t0 {
+  background: rgba(110, 242, 163, 0.12);
+}
+.legend-tiers .t1 {
+  background: rgba(190, 220, 140, 0.12);
+}
+.legend-tiers .t2 {
+  background: rgba(232, 195, 90, 0.14);
+}
+.legend-tiers .t3 {
+  background: rgba(224, 122, 78, 0.16);
+}
+.legend-tiers .t4 {
+  background: rgba(224, 60, 60, 0.2);
+}
+.legend-keys {
+  columns: 2;
+  list-style: none;
+  padding-left: 0 !important;
+}
+.legend-keys b {
+  color: #fff;
+}
+
 /* ---------- build/phase pill ---------- */
 #phase-pill {
   position: fixed;

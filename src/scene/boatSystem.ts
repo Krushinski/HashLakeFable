@@ -61,6 +61,7 @@ export class BoatSystem {
   private heave = 0
   private bowLift = 0
   private presetIndex = 0
+  private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
   private ready = false
@@ -124,6 +125,11 @@ export class BoatSystem {
       return p
     })()
     mat.side = THREE.DoubleSide
+  }
+
+  /** Brief §15.5 — a new block makes the boat lurch/hop briefly. */
+  hop(): void {
+    this.hopEnergy = 1
   }
 
   cyclePreset(): string {
@@ -255,8 +261,19 @@ export class BoatSystem {
     const waveRollBlend = this.roll * 0.7 + targetRollWave * 0.65
     this.roll += (waveRollBlend - this.roll) * Math.min(1, dt * 4)
 
+    // block-pulse hop: quick lift, springy settle
+    let hopY = 0
+    if (this.hopEnergy > 0) {
+      this.hopEnergy = Math.max(0, this.hopEnergy - dt * 1.4)
+      hopY = Math.sin((1 - this.hopEnergy) * Math.PI) * 0.34 * this.hopEnergy
+    }
+
     // ---------------------------------------------------------- pose
-    this.group.position.set(this.x, this.heave + 0.06 - (boosting ? 0.09 : 0), this.z)
+    this.group.position.set(
+      this.x,
+      this.heave + hopY + 0.06 - (boosting ? 0.09 : 0),
+      this.z,
+    )
     this.group.rotation.set(0, 0, 0)
     this.group.rotateY(-this.heading + Math.PI)
     this.group.rotateX(this.pitch - this.bowLift)
