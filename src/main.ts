@@ -9,6 +9,7 @@ import { WaterSystem } from './scene/waterSystem'
 import { TerrainSystem } from './scene/terrainSystem'
 import { ForestSystem } from './scene/forestSystem'
 import { CloudSystem } from './scene/cloudSystem'
+import { BoatSystem, type DriveInput } from './scene/boatSystem'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -82,6 +83,8 @@ async function boot(): Promise<void> {
   const forest = new ForestSystem(scene)
   forest.load().catch((err) => console.error('forest load failed:', err))
   const clouds = new CloudSystem(scene)
+  const boat = new BoatSystem(scene, waveField)
+  boat.load().catch((err) => console.error('boat load failed:', err))
 
   sky.bakeEnvironment()
 
@@ -132,6 +135,57 @@ async function boot(): Promise<void> {
     if (idx >= 0) applyTier(TIER_PREVIEWS[idx])
   })
 
+  // ---------- drive mode input ----------
+  let driveMode = false
+  const input: DriveInput = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    boost: false,
+    superBoost: false,
+    anchor: false,
+  }
+  const keyMap: Record<string, keyof DriveInput> = {
+    ArrowUp: 'forward',
+    ArrowDown: 'backward',
+    ArrowLeft: 'left',
+    ArrowRight: 'right',
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key in keyMap) {
+      input[keyMap[e.key]] = true
+      if (driveMode) e.preventDefault()
+    }
+    if (e.key === 'Shift') input.boost = true
+    if (e.key === 'Control') input.superBoost = e.shiftKey
+    if (e.code === 'Space') {
+      input.anchor = true
+      if (driveMode) e.preventDefault()
+    }
+    if (e.key === 'x' || e.key === 'X') {
+      driveMode = !driveMode
+      updatePill(rendererPath)
+    }
+    if ((e.key === 'c' || e.key === 'C') && driveMode) {
+      boat.cyclePreset()
+      updatePill(rendererPath)
+    }
+    if (e.key === 'Escape' && driveMode) {
+      driveMode = false
+      updatePill(rendererPath)
+    }
+  })
+  window.addEventListener('keyup', (e) => {
+    if (e.key in keyMap) input[keyMap[e.key]] = false
+    if (e.key === 'Shift') {
+      input.boost = false
+      input.superBoost = false
+    }
+    if (e.key === 'Control') input.superBoost = false
+    if (e.code === 'Space') input.anchor = false
+  })
+
   // ---------- resize ----------
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight
@@ -147,7 +201,10 @@ async function boot(): Promise<void> {
   const clock = new THREE.Clock()
 
   const updatePill = (path: string) => {
-    phasePill.textContent = `${phasePillText(path)} · ${tier.name} · ${fps.toFixed(0)} fps`
+    const drive = driveMode
+      ? ` · DRIVE ${boat.speedMph.toFixed(0)} mph · ${boat.presetName}`
+      : ''
+    phasePill.textContent = `${phasePillText(path)} · ${tier.name} · ${fps.toFixed(0)} fps${drive}`
   }
 
   // Live-debug handle (console-only; no UI surface).
@@ -161,6 +218,11 @@ async function boot(): Promise<void> {
     forest,
     camera,
     camRig,
+    boat,
+    input,
+    setDrive: (v: boolean) => {
+      driveMode = v
+    },
   }
 
   renderer.setAnimationLoop(() => {
@@ -170,18 +232,23 @@ async function boot(): Promise<void> {
 
     water.update(dt)
     clouds.update(dt)
+    boat.update(dt, driveMode ? input : null)
 
-    // Slow cinematic drift around the rig.
-    camera.position.set(
-      camRig.pos.x + Math.sin(t * 0.04) * 10 * camRig.drift,
-      camRig.pos.y + Math.sin(t * 0.1) * 0.4 * camRig.drift,
-      camRig.pos.z,
-    )
-    camera.lookAt(
-      camRig.look.x + Math.sin(t * 0.03) * 18 * camRig.drift,
-      camRig.look.y,
-      camRig.look.z,
-    )
+    if (driveMode) {
+      boat.driveCamera(camera, dt)
+    } else {
+      // Slow cinematic drift around the rig.
+      camera.position.set(
+        camRig.pos.x + Math.sin(t * 0.04) * 10 * camRig.drift,
+        camRig.pos.y + Math.sin(t * 0.1) * 0.4 * camRig.drift,
+        camRig.pos.z,
+      )
+      camera.lookAt(
+        camRig.look.x + Math.sin(t * 0.03) * 18 * camRig.drift,
+        camRig.look.y,
+        camRig.look.z,
+      )
+    }
 
     post.render()
 

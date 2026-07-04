@@ -219,10 +219,16 @@ export class WaterSystem {
     const foamSample = texture(foamTex, foamUv)
     const foamBig = texture(foamTex, worldXZ.mul(0.011).add(t.mul(0.004))).g
 
+    // normalize fold by sea state so storms whitecap the crests, not the
+    // whole lake
+    const seaState = this.waveField.uSwell
+      .add(this.waveField.uChop)
+      .mul(0.5)
+    const foldNorm = vFold.div(seaState.sub(1).max(0).mul(0.85).add(1))
     const crestFoam = smoothstep(
       float(0.34),
       float(0.68),
-      vFold.add(foamSample.g.sub(0.5).mul(0.3)),
+      foldNorm.add(foamSample.g.sub(0.5).mul(0.3)),
     )
     const lap = vDepth
       .mul(5.2)
