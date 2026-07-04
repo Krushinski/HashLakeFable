@@ -45,11 +45,10 @@ export const DRIVE_PRESETS: DriveCameraPreset[] = [
   { name: 'Chase', back: 12.5, up: 4.4, lookAhead: 10, lookUp: 1.2 },
   { name: 'Low Chase', back: 9, up: 2.1, lookAhead: 14, lookUp: 1.6 },
   { name: 'High Map', back: 24, up: 30, lookAhead: 4, lookUp: 0 },
-  // OJ: like Chase but forward-looking and pulled out — see what's coming
-  { name: 'OJ Mode', back: 17, up: 7.2, lookAhead: 46, lookUp: 3 },
-  // Vice: near-helicopter — boat rides the bottom edge, the world fills
-  // the frame: sky, mountains, land, water all at once
-  { name: 'Vice City', back: 9, up: 26, lookAhead: 135, lookUp: 7 },
+  // OJ: helicopter tracking shot — boat low in frame, long forward view
+  { name: 'OJ Mode', back: 30, up: 17, lookAhead: 68, lookUp: 5 },
+  // Vice: full aerial — boat at the bottom edge, the WHOLE world in frame
+  { name: 'Vice City', back: 16, up: 46, lookAhead: 240, lookUp: 12 },
 ]
 
 export class BoatSystem {

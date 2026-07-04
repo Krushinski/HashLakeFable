@@ -147,6 +147,66 @@ export function terrainHeight(x: number, z: number): number {
   return h
 }
 
+/**
+ * Distant background ranges (§user: fill the horizon flatness where it
+ * pleases the eye) — a cheap separate band far beyond the main terrain,
+ * hazed by fog into aerial-perspective silhouettes. North wall + east and
+ * west spurs; the south stays open to breathe.
+ */
+const FAR_RIDGES: Ridge[] = [
+  { x1: -2900, z1: -3400, h1: 760, x2: -900, z2: -3750, h2: 1120, r: 950 },
+  { x1: -900, z1: -3750, h1: 1120, x2: 1500, z2: -3500, h2: 880, r: 900 },
+  { x1: 2300, z1: -2600, h1: 640, x2: 3600, z2: -1500, h2: 430, r: 760 },
+  { x1: -3600, z1: -1300, h1: 540, x2: -2600, z2: -2300, h2: 730, r: 800 },
+]
+
+function farRangeHeight(x: number, z: number): number {
+  let h = 0
+  for (const rg of FAR_RIDGES) {
+    const ax = x - rg.x1
+    const az = z - rg.z1
+    const bx = rg.x2 - rg.x1
+    const bz = rg.z2 - rg.z1
+    let t = (ax * bx + az * bz) / (bx * bx + bz * bz)
+    t = Math.max(0, Math.min(1, t))
+    const d = Math.hypot(x - (rg.x1 + bx * t), z - (rg.z1 + bz * t)) / rg.r
+    if (d > 2.4) continue
+    const crest = rg.h1 + (rg.h2 - rg.h1) * t
+    const flank = Math.pow(Math.max(0, 1 - d / 2.4), 1.7)
+    const rid = ridgedNoise(x * 0.0009, z * 0.0009, 733)
+    h = Math.max(h, crest * flank * (0.55 + 0.4 * rid))
+  }
+  return h
+}
+
+export class FarRanges {
+  constructor(scene: THREE.Scene) {
+    const geo = new THREE.PlaneGeometry(9000, 9000, 160, 160)
+    geo.rotateX(-Math.PI / 2)
+    const pos = geo.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, farRangeHeight(pos.getX(i), pos.getZ(i)) - 4)
+    }
+    geo.computeVertexNormals()
+
+    const material = new THREE.MeshStandardNodeMaterial()
+    material.roughness = 1
+    const vH = varying(float(0), 'vFarH')
+    material.positionNode = Fn(() => {
+      vH.assign(positionLocal.y)
+      return positionLocal
+    })()
+    material.colorNode = Fn(() => {
+      const rock = mix(color(0x55524c), color(0x7d786f),
+        mx_noise_float(vec3(positionLocal.xz.mul(0.004), 3.3)).mul(0.5).add(0.5))
+      const snow = color(0xe8edf0)
+      return mix(rock, snow, smoothstep(float(640), float(800), vH))
+    })()
+    const mesh = new THREE.Mesh(geo, material)
+    scene.add(mesh)
+  }
+}
+
 export class TerrainSystem {
   readonly mesh: THREE.Mesh
 

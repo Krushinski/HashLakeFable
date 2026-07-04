@@ -16,7 +16,9 @@ import { LightningSystem } from './scene/lightningSystem'
 import { FireSkySystem } from './scene/fireSkySystem'
 import { WakeSystem } from './scene/wakeSystem'
 import { Speedometer } from './ui/speedometer'
-import { AudioSystem } from './core/audioSystem'
+import { LofiRadio } from './core/lofiRadio'
+import { Minimap } from './ui/minimap'
+import { FarRanges } from './scene/terrainSystem'
 import { LiveBitcoinStore } from './state/liveBitcoinStore'
 import { WeatherEngine } from './state/weatherEngine'
 import { bus } from './state/eventBus'
@@ -51,7 +53,7 @@ const TIER_VISUALS = {
   turbidity: [8, 12, 20, 30, 40],
   rayleigh: [1.8, 1.4, 0.8, 0.4, 0.2],
   exposure: [0.5, 0.47, 0.43, 0.38, 0.33],
-  sunIntensity: [2.6, 2.2, 1.5, 0.85, 0.55],
+  sunIntensity: [2.2, 1.9, 1.4, 0.85, 0.55],
   fogColor: [0xcfdad2, 0xb9c4bf, 0x8a949a, 0x525c63, 0x4a2a20],
   fogNear: [1700, 1500, 1200, 900, 700],
   fogFar: [5600, 5100, 4300, 3400, 2800],
@@ -103,8 +105,8 @@ async function boot(): Promise<void> {
   const fireSky = new FireSkySystem(scene)
   const wake = new WakeSystem(scene, waveField, boat)
   const speedo = new Speedometer()
-  const audio = new AudioSystem()
-  lightning.onStrike = (i) => audio.thunder(i)
+  const lofi = new LofiRadio()
+  new FarRanges(scene)
 
   sky.bakeEnvironment()
 
@@ -159,7 +161,7 @@ async function boot(): Promise<void> {
   const post = new PipelineCtor(renderer)
   const scenePass = pass(scene, camera)
   const scenePassColor = scenePass.getTextureNode('output')
-  post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.15, 0.35, 1.2))
+  post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.09, 0.3, 1.45))
 
   // ---------- UI ----------
   const pill = new BitcoinPill(store)
@@ -177,6 +179,7 @@ async function boot(): Promise<void> {
   }))
 
   const governor = new QualityGovernor(renderer)
+  const minimap = new Minimap(boat)
 
   // event toasts (§28 tone)
   bus.on('whale', ({ btc }) => {
@@ -232,12 +235,16 @@ async function boot(): Promise<void> {
       updatePill()
     }
     if (e.key === 'm' || e.key === 'M') {
-      toast.show(audio.toggle() ? 'Sound on' : 'Sound off')
+      toast.show(lofi.toggle() ? 'Lofi radio on' : 'Lofi radio off')
     }
     if (e.key === 'c' || e.key === 'C') {
       if (driveMode) {
         toast.show(boat.cyclePreset())
         updatePill()
+      } else {
+        frameIndex = (frameIndex + 1) % FRAME_PRESETS.length
+        applyFramePreset(FRAME_PRESETS[frameIndex])
+        toast.show(FRAME_PRESETS[frameIndex].name)
       }
     }
     if (e.key === 'd' || e.key === 'D') debug.toggle()
@@ -282,6 +289,26 @@ async function boot(): Promise<void> {
     if (e.key === 'z' || e.key === 'Z') input.ultraBoost = false
     if (e.code === 'Space') input.anchor = false
   })
+
+  // ---------- frame-mode scenic presets (§19.1, C outside drive) ----------
+  interface FramePreset {
+    name: string
+    off: [number, number, number]
+    look: [number, number, number]
+  }
+  const FRAME_PRESETS: FramePreset[] = [
+    { name: 'Wide Reflection', off: [0, 7.5, 85], look: [-20, 26, -1200] },
+    { name: 'Hero Profile Low', off: [58, 2.6, 6], look: [0, 3, 0] },
+    { name: 'Three-Quarter Portrait', off: [24, 5.5, 28], look: [0, 2.5, -12] },
+    { name: 'Cove Shot', off: [175, 13, -55], look: [0, 6, 0] },
+  ]
+  let frameIndex = 0
+  const applyFramePreset = (p: FramePreset) => {
+    camRig.pos.set(boat.x + p.off[0], p.off[1], boat.z + p.off[2])
+    camRig.look.set(boat.x + p.look[0], p.look[1], boat.z + p.look[2])
+    lookYaw = 0
+    lookPitch = 0
+  }
 
   // ---------- frame-mode look-around (click-drag, §6.1) ----------
   let dragging = false
@@ -428,12 +455,6 @@ async function boot(): Promise<void> {
     // drive feel
     wake.update(dt)
     speedo.update(boat.speedMph)
-    audio.update(
-      boat.speedMph,
-      driveMode && input.forward,
-      driveMode && input.forward && (input.boost || input.superBoost),
-      weather.dials.wind,
-    )
 
     if (driveMode) {
       boat.driveCamera(camera, dt)
@@ -466,10 +487,10 @@ async function boot(): Promise<void> {
       camera.lookAt(curLook)
     }
 
-    // "heavenly blinding" fix: ease exposure down when facing the sun
+    // "heavenly blinding" fix, round 2: much stronger sun-facing ease
     camera.getWorldDirection(tmpDir)
     const facing = Math.max(0, tmpDir.dot(sky.sunDirection))
-    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.26)
+    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.48)
 
     post.render()
 
@@ -478,6 +499,7 @@ async function boot(): Promise<void> {
       pillTimer = 0
       pill.update()
     }
+    minimap.update()
 
     fpsAccum += rawDt
     fpsFrames++
