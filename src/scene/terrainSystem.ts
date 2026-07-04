@@ -29,7 +29,7 @@ import { bedHeight, shoreSdf } from './lakeMap'
  */
 
 const DOMAIN = 5120
-const CELLS = 448
+const CELLS = 528
 
 interface Ridge {
   x1: number
@@ -295,20 +295,47 @@ export class TerrainSystem {
         smoothstep(float(60), float(220), vHeight),
       )
 
-      // rock takes over on slopes and altitude; banded striations
+      // rock takes over on slopes and altitude; banded striations at two
+      // scales — broad strata + finer fracture detail
       const stria = mx_noise_float(
         vec3(worldXZ.x.mul(0.02), vHeight.mul(0.055), worldXZ.y.mul(0.02)),
       )
-      const rock = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
+      const fracture = mx_noise_float(
+        vec3(worldXZ.x.mul(0.11), vHeight.mul(0.16), worldXZ.y.mul(0.11)),
+      )
+      const rockBase = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
+      const rock = mix(
+        rockBase,
+        mix(color(0x6b6257), color(0x9a938a), fracture.mul(0.5).add(0.5)),
+        0.35,
+      )
+      // scree fans collect on the mid slopes below the crags
+      const scree = color(0x7a7268)
+      const screeMask = smoothstep(float(0.24), float(0.36), vSlope)
+        .mul(float(1).sub(smoothstep(float(0.42), float(0.6), vSlope)))
+        .mul(smoothstep(float(160), float(280), vHeight))
+        .mul(patch.mul(0.5).add(0.5))
 
       const slopeRock = smoothstep(float(0.35), float(0.62), vSlope)
       const altRock = smoothstep(float(210), float(330), vHeight)
       const rockMask = slopeRock.max(altRock)
 
-      // snow on high, flatter faces — selective caps, not icing
-      const snowMask = smoothstep(float(470), float(600), vHeight).mul(
-        float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)),
-      )
+      // subalpine golden band where the meadow thins into rock
+      const subalpine = color(0x96914e)
+      const subalpMask = smoothstep(float(260), float(360), vHeight)
+        .mul(float(1).sub(smoothstep(float(360), float(470), vHeight)))
+        .mul(float(1).sub(slopeRock))
+        .mul(macro.mul(0.5).add(0.5))
+
+      // snow on high, flatter faces — the line broken by drift noise so
+      // it reads as fingers and gullies, never a contour line
+      const snowJitter = mx_noise_float(vec3(worldXZ.mul(0.006), 21.7))
+        .mul(70)
+      const snowMask = smoothstep(
+        float(455),
+        float(590),
+        vHeight.add(snowJitter),
+      ).mul(float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)))
 
       const beachToGrass = mix(
         beach,
@@ -319,7 +346,9 @@ export class TerrainSystem {
       )
       let ground = mix(bed, beachToGrass,
         smoothstep(float(-0.35), float(0.25), vHeight))
+      ground = mix(ground, subalpine, subalpMask.mul(0.6))
       ground = mix(ground, rock, rockMask)
+      ground = mix(ground, scree, screeMask)
       ground = mix(ground, snow, snowMask)
 
       return ground.mul(grain.mul(0.12).add(0.94))
