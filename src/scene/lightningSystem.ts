@@ -90,6 +90,8 @@ export class LightningSystem {
   private strike: Strike | null = null
   private nextIn = 6
   private rand = seededRandom(60660)
+  /** Hook for thunder audio etc. — called with 0..1 apparent intensity. */
+  onStrike: ((intensity: number) => void) | null = null
 
   constructor(scene: THREE.Scene) {
     this.flashLight = new THREE.DirectionalLight(0xb8c8ff, 0)
@@ -162,5 +164,7 @@ export class LightningSystem {
       x,
       z,
     }
+    // closer strike = louder thunder
+    this.onStrike?.(Math.max(0.25, 1 - dist / 1800))
   }
 }

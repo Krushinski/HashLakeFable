@@ -14,6 +14,9 @@ import { EffectsSystem } from './scene/effects'
 import { RainSystem } from './scene/rainSystem'
 import { LightningSystem } from './scene/lightningSystem'
 import { FireSkySystem } from './scene/fireSkySystem'
+import { WakeSystem } from './scene/wakeSystem'
+import { Speedometer } from './ui/speedometer'
+import { AudioSystem } from './core/audioSystem'
 import { LiveBitcoinStore } from './state/liveBitcoinStore'
 import { WeatherEngine } from './state/weatherEngine'
 import { bus } from './state/eventBus'
@@ -98,6 +101,10 @@ async function boot(): Promise<void> {
   const rain = new RainSystem(scene, renderer)
   const lightning = new LightningSystem(scene)
   const fireSky = new FireSkySystem(scene)
+  const wake = new WakeSystem(scene, waveField, boat)
+  const speedo = new Speedometer()
+  const audio = new AudioSystem()
+  lightning.onStrike = (i) => audio.thunder(i)
 
   sky.bakeEnvironment()
 
@@ -221,7 +228,11 @@ async function boot(): Promise<void> {
     if (e.key === 'x' || e.key === 'X') {
       driveMode = !driveMode
       toast.setMode(driveMode ? 'drive' : 'frame')
+      speedo.setVisible(driveMode)
       updatePill()
+    }
+    if (e.key === 'm' || e.key === 'M') {
+      toast.show(audio.toggle() ? 'Sound on' : 'Sound off')
     }
     if (e.key === 'c' || e.key === 'C') {
       if (driveMode) {
@@ -257,6 +268,7 @@ async function boot(): Promise<void> {
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
       toast.setMode('frame')
+      speedo.setVisible(false)
       updatePill()
     }
   })
@@ -412,6 +424,16 @@ async function boot(): Promise<void> {
     rain.update(dt, tmpFocus, weather.dials.rain, weather.dials.wind)
     lightning.update(dt, weather.dials.lightning, boat.x, boat.z)
     fireSky.update(dt, weather.dials.fireWeather, tmpFocus)
+
+    // drive feel
+    wake.update(dt)
+    speedo.update(boat.speedMph)
+    audio.update(
+      boat.speedMph,
+      driveMode && input.forward,
+      driveMode && input.forward && (input.boost || input.superBoost),
+      weather.dials.wind,
+    )
 
     if (driveMode) {
       boat.driveCamera(camera, dt)

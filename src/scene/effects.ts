@@ -127,15 +127,15 @@ export class EffectsSystem {
 
     const y = this.waveField.heightAt(x, z)
 
-    // rings: count scales with size
+    // rings: count scales with size; slower, weightier expansion
     const ringCount = Math.round(2 + scale * 1.4)
     for (let i = 0; i < ringCount; i++) {
       this.fireRing(x, y, z, {
         kind: 'whale',
-        delay: i * 0.5,
+        delay: i * 0.65,
         maxRadius: (26 + scale * 34) * (1 - i * 0.16),
         speed: 10 + scale * 5,
-        life: 2.8 + scale,
+        life: 3.6 + scale * 1.3,
       })
     }
 
@@ -156,12 +156,12 @@ export class EffectsSystem {
       splash.origin.set(x, y, z)
       splash.points.position.copy(splash.origin)
       splash.age = 0
-      splash.life = 1.6 + scale * 0.5
+      splash.life = 2.3 + scale * 0.8 // cinematic hang time
       splash.scale = scale
       splash.active = true
       splash.points.visible = true
       splash.mat.opacity = 0.95
-      splash.mat.size = 0.4 + scale * 0.3
+      splash.mat.size = 0.5 + scale * 0.42
     }
   }
 
@@ -209,7 +209,8 @@ export class EffectsSystem {
     ring.speed = opts.speed
     ring.kind = opts.kind
     ring.active = true
-    ring.mat.color.setHex(opts.kind === 'block' ? 0x53e0d2 : 0xcfeee9)
+    // block pulses speak the HashLake3 electric language; whales foam-white
+    ring.mat.color.setHex(opts.kind === 'block' ? 0x6ffce8 : 0xd8f2ec)
   }
 
   update(dt: number): void {
@@ -217,17 +218,21 @@ export class EffectsSystem {
       if (!r.active) continue
       r.age += dt
       if (r.age < 0) continue
-      const radius = Math.min(r.maxRadius, r.age * r.speed)
       const lifeT = r.age / r.life
-      if (lifeT >= 1 || radius >= r.maxRadius) {
+      if (lifeT >= 1) {
         r.active = false
         r.mesh.visible = false
         continue
       }
+      // snappy pulse: fast electric attack, weighty ease-out settle
+      const ease = 1 - Math.pow(1 - lifeT, r.kind === 'block' ? 3.2 : 2.4)
+      const radius = r.maxRadius * ease
       r.mesh.visible = true
       r.mesh.scale.setScalar(Math.max(radius, 0.01))
-      // leading ring reads clearly, then dissolves
-      r.mat.opacity = (1 - lifeT) * (r.kind === 'block' ? 0.85 : 0.6)
+      // crisp leading edge with a bright birth-flash, then dissolve
+      const flash = r.kind === 'block' ? Math.max(0, 1 - lifeT * 6) * 0.6 : 0
+      r.mat.opacity =
+        (1 - lifeT) * (r.kind === 'block' ? 0.9 : 0.62) + flash
       // ride the waves
       r.mesh.position.y =
         this.waveField.heightAt(r.mesh.position.x, r.mesh.position.z) + 0.25
@@ -245,7 +250,7 @@ export class EffectsSystem {
       const pos = s.points.geometry.attributes
         .position as THREE.BufferAttribute
       for (let i = 0; i < SPRAY_COUNT; i++) {
-        s.vel[i * 3 + 1] -= 9.8 * dt // gravity
+        s.vel[i * 3 + 1] -= 6.4 * dt // cinematic gravity — heavy, unhurried
         pos.setXYZ(
           i,
           pos.getX(i) + s.vel[i * 3] * dt,
