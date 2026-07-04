@@ -52,10 +52,16 @@ export class LofiRadio {
     }
     this.enabled = true
 
-    // real player size, parked off-screen (tiny players refuse playback)
+    // VISIBLE mini player, bottom-right: YouTube treats viewable players
+    // as first-class (offscreen ones get throttled/refused in some
+    // profiles), and the user can SEE any error the embed reports —
+    // no more silent mystery
     this.host = document.createElement('div')
     this.host.style.cssText =
-      'position:fixed;left:-9999px;top:0;width:320px;height:180px;'
+      'position:fixed;right:16px;bottom:16px;width:224px;height:126px;' +
+      'z-index:44;border-radius:12px;overflow:hidden;' +
+      'border:1px solid rgba(69,200,192,0.25);' +
+      'box-shadow:0 6px 28px rgba(0,0,0,0.45);opacity:0.94;'
     const inner = document.createElement('div')
     this.host.appendChild(inner)
     document.body.appendChild(this.host)
@@ -64,14 +70,13 @@ export class LofiRadio {
       // user may have toggled off while the API script was loading
       if (!this.enabled || !this.host) return
       this.player = new window.YT!.Player(inner, {
-        width: 320,
-        height: 180,
+        width: 224,
+        height: 126,
         videoId: 'jfKfPfyJRdk',
         playerVars: {
           autoplay: 1,
           playsinline: 1,
-          controls: 0,
-          disablekb: 1,
+          controls: 1,
         },
         events: {
           onReady: (e) => {

@@ -1,4 +1,5 @@
-import { cos, float, sin, uniform, vec3 } from 'three/tsl'
+import * as THREE from 'three/webgpu'
+import { cos, exp, float, sin, uniform, uniformArray, vec3 } from 'three/tsl'
 import { seededRandom } from '../core/noise'
 import { waterDepth } from './lakeMap'
 
@@ -113,6 +114,17 @@ export class WaveField {
   readonly uChop = uniform(1)
   readonly uChoppiness = uniform(1)
 
+  // Boat-wake sources: a ring buffer of recent disturbance points, each
+  // vec4(x, z, birthTime, amplitude). The water's vertex stage grows an
+  // expanding, decaying ring packet from every source — superposed along
+  // the boat's path they become the REAL displaced wedge of a wake, and
+  // their crest-fold feeds the same whitecap-foam channel the storms use.
+  static readonly WAKE_N = 24
+  readonly uWakeSources = uniformArray(
+    Array.from({ length: WaveField.WAKE_N }, () => new THREE.Vector4(0, 0, -1e3, 0)),
+  )
+  private wakeCursor = 0
+
   private simTime = 0
 
   constructor(chopCount = 26) {
@@ -130,6 +142,13 @@ export class WaveField {
 
   get time(): number {
     return this.simTime
+  }
+
+  /** Drop a wake disturbance at (x, z); amp ≈ 0..0.24 with boat speed. */
+  pushWakeSource(x: number, z: number, amp: number): void {
+    const v = this.uWakeSources.array[this.wakeCursor] as THREE.Vector4
+    v.set(x, z, this.simTime, amp)
+    this.wakeCursor = (this.wakeCursor + 1) % WaveField.WAKE_N
   }
 
   private bandScaleCpu(band: 0 | 1): number {
@@ -181,6 +200,32 @@ export class WaveField {
       nAccX.addAssign(wa.mul(w.dirX).mul(c))
       nAccZ.addAssign(wa.mul(w.dirZ).mul(c))
       fold.addAssign(qa.mul(w.k).mul(s))
+    }
+
+    // ---- boat wake: expanding ring packets from each disturbance ----
+    const WAKE_C = 2.3 // ring propagation speed (m/s)
+    for (let i = 0; i < WaveField.WAKE_N; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = this.uWakeSources.element(i) as any
+      const dx = posXZ.x.sub(s.x)
+      const dz = posXZ.y.sub(s.y)
+      const r = dx.mul(dx).add(dz.mul(dz)).add(0.04).sqrt()
+      const age = this.uTime.sub(s.z)
+      const alive = age.greaterThan(0).select(float(1), float(0))
+      const ringR = age.mul(WAKE_C).add(0.6)
+      const band = r.sub(ringR).div(1.7)
+      const env = exp(band.mul(band).negate())
+        .mul(exp(age.mul(-0.5)))
+        .mul(s.w)
+        .mul(alive)
+        .mul(ampFade)
+      const phase = r.mul(2.6).sub(age.mul(5.6))
+      offset.y.addAssign(sin(phase).mul(env))
+      const slope = cos(phase).mul(env).mul(2.6)
+      nAccX.addAssign(slope.mul(dx.div(r)))
+      nAccZ.addAssign(slope.mul(dz.div(r)))
+      // wake crests whitecap through the same foam channel as storms
+      fold.addAssign(env.mul(2.4))
     }
 
     const normal = vec3(nAccX.negate(), float(1).sub(fold), nAccZ.negate())

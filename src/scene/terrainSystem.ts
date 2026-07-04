@@ -99,10 +99,13 @@ function mountainHeight(x: number, z: number): number {
     // sharp flank profile — steep near the crest, easing at the skirt
     const flank = Math.pow(Math.max(0, 1 - d / 2.6), 1.8)
 
-    // carve with ridged noise: strong crest articulation + rocky detail
+    // carve with ridged noise: strong crest articulation + rocky detail,
+    // plus a fine third octave for crag definition (§user hero pass 2)
     const macro = ridgedNoise(x * 0.0011, z * 0.0011, 913)
     const micro = ridgedNoise(x * 0.0048, z * 0.0048, 407)
-    const carved = crest * flank * (0.52 + 0.38 * macro + 0.22 * micro)
+    const crag = ridgedNoise(x * 0.011, z * 0.011, 1207)
+    const carved =
+      crest * flank * (0.47 + 0.38 * macro + 0.24 * micro + 0.12 * crag)
 
     h = Math.max(h, carved)
   }

@@ -69,9 +69,10 @@ export const DRIVE_PRESETS: DriveCameraPreset[] = [
   { name: 'Chase', back: 12.5, up: 4.4, lookAhead: 10, lookUp: 1.2 },
   { name: 'Low Chase', back: 9, up: 2.1, lookAhead: 14, lookUp: 1.6 },
   { name: 'High Map', back: 24, up: 30, lookAhead: 4, lookUp: 0 },
-  // Sky Chase: High Map's altitude with OJ's forward view — see where
-  // you're going from up top (user request; High Map stays untouched)
-  { name: 'Sky Chase', back: 40, up: 30, lookAhead: 60, lookUp: 2 },
+  // Sky Chase: a FORWARD-LOOKING High Map — top-down altitude, view
+  // shifted ahead so you can read the water coming at you (§user v2:
+  // was too close to OJ)
+  { name: 'Sky Chase', back: 20, up: 38, lookAhead: 20, lookUp: 0 },
   // OJ: helicopter tracking shot — boat ~86% down frame, horizon high
   // (framing solved against the Codex reference screenshots)
   { name: 'OJ Mode', back: 44, up: 26, lookAhead: 28, lookUp: 8 },

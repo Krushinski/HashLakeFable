@@ -234,15 +234,24 @@ export class WaterSystem {
       float(0.68),
       foldNorm.add(foamSample.g.sub(0.5).mul(0.3)),
     )
+    // shoreline trim: two offset lap bands + lacy filaments — the water's
+    // edge reads as living surf working the sand, not a gradient
     const lap = vDepth
       .mul(5.2)
       .sub(t.mul(1.35))
       .sin()
       .mul(0.5)
       .add(0.5)
-    const shoreFoam = smoothstep(float(1.5), float(0.18), vDepth)
-      .mul(lap.mul(0.55).add(0.45))
-      .mul(foamSample.r.mul(0.75).add(0.25))
+    const lap2 = vDepth
+      .mul(9.5)
+      .sub(t.mul(0.9))
+      .add(foamSample.g.mul(2.4))
+      .sin()
+      .mul(0.5)
+      .add(0.5)
+    const shoreFoam = smoothstep(float(2.2), float(0.16), vDepth)
+      .mul(lap.mul(0.45).add(lap2.mul(0.3)).add(0.35))
+      .mul(foamSample.r.mul(0.95).add(0.18))
     const ambientFoam = smoothstep(float(0.62), float(0.95), foamBig)
       .mul(foamSample.r)
       .mul(0.16)

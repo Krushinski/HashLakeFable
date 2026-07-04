@@ -84,15 +84,15 @@ export class LakeDressing {
     const rockVariants = [...rocks.values()]
     const rand = seededRandom(90210)
 
-    // ---- palms crown the island plateau ----
+    // ---- palms: a GIANT clustered grove at the island's heart ----
     const palmSlots: { x: number; z: number }[] = []
-    for (let i = 0; i < 90 && palmSlots.length < 8; i++) {
+    for (let i = 0; i < 120 && palmSlots.length < 9; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = ISLAND.landR * (0.15 + rand() * 0.62)
+      const rad = ISLAND.landR * (0.04 + rand() * 0.3)
       const x = ISLAND.cx + Math.sin(ang) * rad
       const z = ISLAND.cz + Math.cos(ang) * rad
-      if (bedHeight(x, z) < 0.8) continue
-      if (palmSlots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 80)) continue
+      if (bedHeight(x, z) < 0.7) continue
+      if (palmSlots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 42)) continue
       palmSlots.push({ x, z })
     }
     palmSlots.forEach((s, i) => {
@@ -103,34 +103,38 @@ export class LakeDressing {
         m.castShadow = true
         holder.add(m)
       }
-      holder.position.set(s.x, bedHeight(s.x, s.z) - 0.25, s.z)
+      holder.position.set(s.x, bedHeight(s.x, s.z) - 0.3, s.z)
       holder.rotation.y = rand() * Math.PI * 2
-      holder.rotation.x = (rand() - 0.5) * 0.09
-      holder.scale.setScalar(0.8 + rand() * 0.5)
+      holder.rotation.x = (rand() - 0.5) * 0.12
+      // landmark scale — the grove should read from across the lake
+      holder.scale.setScalar(1.7 + rand() * 0.9)
       this.group.add(holder)
     })
 
-    // ---- boulders: island beach ring + scattered shorelines ----
+    // ---- boulders: rocky ring HALF IN THE WATER (the reference island
+    // look — rocks guarding the beach with foam working around them) ----
     interface RockSlot { x: number; z: number; s: number; rot: number }
     const heroRocks: RockSlot[] = []
     const shoreRocks: RockSlot[] = []
-    for (let i = 0; i < 40 && heroRocks.length < 5; i++) {
+    for (let i = 0; i < 120 && heroRocks.length < 14; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = ISLAND.landR * (0.7 + rand() * 0.4)
+      const rad = ISLAND.landR * (0.85 + rand() * 0.45)
       const x = ISLAND.cx + Math.sin(ang) * rad
       const z = ISLAND.cz + Math.cos(ang) * rad
-      if (heroRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 120)) continue
-      heroRocks.push({ x, z, s: 1.6 + rand() * 1.8, rot: rand() * Math.PI * 2 })
+      if (heroRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 90)) continue
+      heroRocks.push({ x, z, s: 1.8 + rand() * 2.4, rot: rand() * Math.PI * 2 })
     }
-    for (let i = 0; i < 600 && shoreRocks.length < 30; i++) {
+    for (let i = 0; i < 900 && shoreRocks.length < 46; i++) {
       const ang = rand() * Math.PI * 2
       const rad = 480 + rand() * 520
       const x = Math.sin(ang) * rad
       const z = Math.cos(ang) * rad * 0.92 + 40
       const s = shoreSdf(x, z)
-      if (s < 0.5 || s > 24) continue
+      // half on the beach, half standing IN the shallows (§inspiration:
+      // rocks in the water with foam working around their feet)
+      if (s < -16 || s > 24) continue
       if (terrainHeight(x, z) > 14) continue
-      if (shoreRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 900)) continue
+      if (shoreRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 700)) continue
       shoreRocks.push({ x, z, s: 1.4 + rand() * 2.6, rot: rand() * Math.PI * 2 })
     }
     // hero rocks (detailed variant), shore rocks (light variant, instanced)
@@ -138,7 +142,9 @@ export class LakeDressing {
     for (const r of heroRocks) {
       for (const p of hero) {
         const m = new THREE.Mesh(p.geometry, p.material)
-        m.position.set(r.x, Math.max(bedHeight(r.x, r.z), 0) - 0.3, r.z)
+        // seat on the actual bed — outside the shoreline that means the
+        // rock breaks the surface with water working around it
+        m.position.set(r.x, bedHeight(r.x, r.z) - 0.35 * r.s, r.z)
         m.rotation.y = r.rot
         m.scale.setScalar(r.s)
         this.group.add(m)
@@ -155,7 +161,7 @@ export class LakeDressing {
       shoreRocks.forEach((r, i) => {
         q.setFromAxisAngle(up, r.rot)
         sc.setScalar(r.s)
-        pos.set(r.x, terrainHeight(r.x, r.z) - 0.35, r.z)
+        pos.set(r.x, terrainHeight(r.x, r.z) - 0.3 * r.s, r.z)
         m4.compose(pos, q, sc)
         inst.setMatrixAt(i, m4)
       })
@@ -163,44 +169,128 @@ export class LakeDressing {
       inst.frustumCulled = false
       this.group.add(inst)
     }
+
+    // ---- bush mounds: soft dark-green shrubs pocketing the shoreline ----
+    const bushGeo = new THREE.IcosahedronGeometry(1, 2)
+    {
+      const bp = bushGeo.attributes.position as THREE.BufferAttribute
+      const brand = seededRandom(4242)
+      for (let i = 0; i < bp.count; i++) {
+        const k = 0.72 + brand() * 0.5
+        bp.setXYZ(i, bp.getX(i) * k, bp.getY(i) * k * 0.52, bp.getZ(i) * k)
+      }
+      bushGeo.computeVertexNormals()
+    }
+    const bushMat = new THREE.MeshStandardMaterial({
+      color: 0x2c4d24,
+      roughness: 0.95,
+    })
+    const bushSlots: { x: number; z: number; s: number }[] = []
+    for (let i = 0; i < 1400 && bushSlots.length < 110; i++) {
+      const ang = rand() * Math.PI * 2
+      const rad = 470 + rand() * 560
+      const x = Math.sin(ang) * rad
+      const z = Math.cos(ang) * rad * 0.92 + 40
+      const s = shoreSdf(x, z)
+      if (s < 3 || s > 46) continue
+      if (terrainHeight(x, z) > 12) continue
+      if (bushSlots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 60)) continue
+      bushSlots.push({ x, z, s: 0.9 + rand() * 1.7 })
+    }
+    const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushSlots.length)
+    bushSlots.forEach((b2, i) => {
+      q.setFromAxisAngle(up, (i * 2.39996) % 6.283)
+      sc.setScalar(b2.s)
+      pos.set(b2.x, terrainHeight(b2.x, b2.z) + 0.15 * b2.s, b2.z)
+      m4.compose(pos, q, sc)
+      bushInst.setMatrixAt(i, m4)
+    })
+    bushInst.instanceMatrix.needsUpdate = true
+    bushInst.frustumCulled = false
+    this.group.add(bushInst)
     console.info(
       `dressing: ${palmSlots.length} palms, ${heroRocks.length}+${shoreRocks.length} rocks`,
     )
   }
 
-  /** Timber dock at the west inlet — planks on piles, reaching open water. */
+  /**
+   * Timber dock at the west inlet — anchored ON the shoreline (found by
+   * marching the SDF to its zero crossing), weathered wood-grain planks
+   * with jitter, framed stringers, piles down to the bed, corner cleats.
+   */
   private buildDock(): void {
-    // march west from the inlet center to find the shoreline
-    let sx = -585
     const sz = 110
-    for (let i = 0; i < 40 && shoreSdf(sx, sz) < 0; i++) sx -= 4
-    const LEN = 20
-    const deckY = 0.62
+    // walk from open water toward land; stop at the water's edge, then
+    // pull back so the first plank starts ON the beach
+    let sx = -585
+    for (let i = 0; i < 60 && shoreSdf(sx, sz) < 0; i++) sx -= 3
+    const startX = sx + 4 // slightly inland of the waterline
+    const LEN = 22
+    const deckY = 0.72
+    const rand = seededRandom(777333)
 
+    const base = import.meta.env.BASE_URL
+    const woodTex = new THREE.TextureLoader().load(
+      `${base}assets/textures/hl-wood.png`,
+    )
+    woodTex.colorSpace = THREE.SRGBColorSpace
+    woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping
     const wood = new THREE.MeshStandardMaterial({
-      color: 0x6e5137,
-      roughness: 0.85,
+      map: woodTex,
+      color: 0xa08a70, // weathers the grain toward silver-gray
+      roughness: 0.88,
     })
     const woodDark = new THREE.MeshStandardMaterial({
-      color: 0x4c3826,
-      roughness: 0.9,
+      map: woodTex,
+      color: 0x5c4a38,
+      roughness: 0.92,
     })
-    // deck: individual planks read as a dock even from the air
     const dock = new THREE.Group()
-    const plankGeo = new THREE.BoxGeometry(0.9, 0.08, 2.3)
-    for (let d = 0; d < LEN; d += 1.0) {
+
+    // planks laid ACROSS the walkway, tiny jitter so it reads hand-built
+    const plankGeo = new THREE.BoxGeometry(0.62, 0.07, 2.4)
+    for (let d = 0; d < LEN; d += 0.7) {
       const plank = new THREE.Mesh(plankGeo, wood)
-      plank.position.set(sx + 2 + d, deckY, sz + (d % 2) * 0.01)
+      plank.position.set(
+        startX + 2 + d,
+        deckY + (rand() - 0.5) * 0.016,
+        sz + (rand() - 0.5) * 0.03,
+      )
+      plank.rotation.y = (rand() - 0.5) * 0.02
       dock.add(plank)
     }
-    // piles
-    const pileGeo = new THREE.CylinderGeometry(0.12, 0.13, 3.2, 8)
-    for (let d = 1; d < LEN; d += 4.5) {
-      for (const side of [-1, 1]) {
+    // stringers under the planks
+    const strGeo = new THREE.BoxGeometry(LEN + 1.4, 0.12, 0.16)
+    for (const side of [-1, 0.98]) {
+      const str = new THREE.Mesh(strGeo, woodDark)
+      str.position.set(startX + 2 + LEN / 2 - 0.35, deckY - 0.1, sz + side)
+      dock.add(str)
+    }
+    // piles down into the bed, with a little rake
+    const pileGeo = new THREE.CylinderGeometry(0.11, 0.135, 3.6, 9)
+    for (let d = 0.5; d < LEN + 1; d += 4.2) {
+      for (const side of [-1.05, 1.05]) {
         const pile = new THREE.Mesh(pileGeo, woodDark)
-        pile.position.set(sx + 2 + d, deckY - 1.4, sz + side * 1.0)
+        pile.position.set(startX + 2 + d, deckY - 1.55, sz + side)
+        pile.rotation.z = (rand() - 0.5) * 0.04
+        pile.rotation.x = (rand() - 0.5) * 0.04
         dock.add(pile)
       }
+    }
+    // end cleats — somewhere to tie the runabout
+    const cleatGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.34, 8)
+    for (const side of [-0.9, 0.9]) {
+      const cleat = new THREE.Mesh(
+        cleatGeo,
+        new THREE.MeshStandardMaterial({
+          color: 0x8d9296,
+          metalness: 0.9,
+          roughness: 0.35,
+        }),
+      )
+      cleat.rotation.z = Math.PI / 2
+      cleat.position.set(startX + 2 + LEN - 0.6, deckY + 0.1, sz + side)
+      dock.add(cleat)
     }
     this.group.add(dock)
   }

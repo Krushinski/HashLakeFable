@@ -316,6 +316,10 @@ async function boot(): Promise<void> {
     { name: 'Cove Shot', off: [175, 13, -55], look: [0, 6, 0] },
     // the same cove framing rotated a full 180° — looks back the other way
     { name: 'Cove Reverse', off: [-175, 13, 55], look: [0, 6, 0] },
+    // close enough to enjoy the varnish (§user: none of the frame views
+    // get near the boat's detail)
+    { name: 'Deck Detail', off: [7.5, 2.4, 4.5], look: [0, 1.1, 0] },
+    { name: 'Golden Close', off: [-6, 1.6, 7.5], look: [0, 1.3, 0] },
   ]
   let frameIndex = 0
   const applyFramePreset = (p: FramePreset) => {

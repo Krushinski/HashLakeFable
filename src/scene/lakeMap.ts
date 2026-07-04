@@ -30,17 +30,20 @@ interface Blob {
 
 /** Organic lake body = smooth union of overlapping rounded shapes. */
 const LAKE_BLOBS: Blob[] = [
-  { cx: 0, cz: 40, rx: 620, rz: 440 }, // main body
+  { cx: 0, cz: 40, rx: 640, rz: 460 }, // main body
   { cx: -140, cz: -430, rx: 260, rz: 240 }, // north bay toward the mountain gateway
   { cx: 560, cz: 190, rx: 250, rz: 200 }, // east cove
-  { cx: -580, cz: 110, rx: 190, rz: 170 }, // west dock inlet
+  { cx: -580, cz: 110, rx: 200, rz: 180 }, // west dock inlet
   { cx: 190, cz: 470, rx: 380, rz: 230 }, // south shallows reach
+  // island back-channel: keeps the water behind the island deep enough
+  // to thread at full speed (§user)
+  { cx: -430, cz: 360, rx: 200, rz: 150 },
 ]
 
 /** Landmark features that shape the lake bed. */
 // island: cubic-falloff plateau (a peaked gaussian left it a 38 m
 // marshmallow) — landR is where the bed crosses the waterline
-export const ISLAND = { cx: -260, cz: 330, r: 155, crest: 3.6, landR: 74 }
+export const ISLAND = { cx: -235, cz: 305, r: 155, crest: 3.6, landR: 74 }
 export const SANDBAR = {
   cx: 230,
   cz: 360,
@@ -142,8 +145,12 @@ export function bedHeight(x: number, z: number): number {
     -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * islandG,
   )
   if (islandG > 0.5) {
+    // strong dune-and-hollow relief — the dome must never read as a
+    // marshmallow (§user, twice)
     bed += (islandG - 0.5) * 2 *
-      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 2.2
+      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 3.4
+    bed += (islandG - 0.5) * 2 *
+      Math.max(0, fbm2(x * 0.045, z * 0.045, { octaves: 2, seed: 17 })) * 1.6
   }
 
   const bar = gaussianBump(

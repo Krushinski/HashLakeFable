@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu'
-import { attribute, positionWorld, smoothstep, texture, uv, vec2, vec3, float } from 'three/tsl'
+import { attribute, positionWorld, smoothstep, texture, uniform, uv, vec2, vec3, float } from 'three/tsl'
 import type { WaveField } from './waveField'
 import type { BoatSystem } from './boatSystem'
 import { makeFoamTexture } from './proceduralTextures'
@@ -138,8 +138,14 @@ export class WakeSystem {
   private lastZ = 0
   private readonly bowSpray: SprayPool
   private readonly rooster: SprayPool
+  private readonly streaks: SprayPool
+  private readonly boil: THREE.Mesh
+  private readonly boilOpacity = { value: 0 }
   private sprayCarry = 0
   private roosterCarry = 0
+  private streakCarry = 0
+  private wakeSrcLastX = 0
+  private wakeSrcLastZ = 0
 
   constructor(
     scene: THREE.Scene,
@@ -215,6 +221,34 @@ export class WakeSystem {
 
     this.bowSpray = new SprayPool(scene, 420, 0.6, 0.55)
     this.rooster = new SprayPool(scene, 260, 1.25, 0.42)
+    // skimming streaks: small fast droplets thrown flat across the water
+    this.streaks = new SprayPool(scene, 520, 0.3, 0.5)
+
+    // ---- transom boil: the churning prop wash right off the engine ----
+    // two counter-scrolling foam samples multiplied = live bubbling; it
+    // rides the (wake-displaced) surface just behind the stern
+    const boilGeo = new THREE.CircleGeometry(1, 40)
+    boilGeo.rotateX(-Math.PI / 2)
+    const boilMat = new THREE.MeshBasicNodeMaterial()
+    boilMat.transparent = true
+    boilMat.depthWrite = false
+    const bt = this.waveField.uTime
+    const buv = vec2(positionWorld.x, positionWorld.z)
+    const b1 = texture(foam, buv.mul(0.55).add(vec2(bt.mul(0.55), bt.mul(0.34))))
+    const b2 = texture(foam, buv.mul(0.31).sub(vec2(bt.mul(0.42), bt.mul(-0.5))))
+    const churn = b1.r.mul(1.4).add(b1.g.mul(0.5)).mul(b2.r.mul(1.2).add(0.35))
+    const uBoil = uniform(0)
+    this.boilOpacity = uBoil as unknown as { value: number }
+    // radial falloff from the disc center via uv (CircleGeometry uv is 0..1)
+    const rr = uv().sub(0.5).length().mul(2)
+    const radial = smoothstep(float(1.0), float(0.25), rr)
+    boilMat.colorNode = vec3(0.93, 0.985, 0.965).mul(churn.mul(0.5).add(0.75))
+    boilMat.opacityNode = churn.clamp(0, 1.4).mul(radial).mul(uBoil)
+    this.boil = new THREE.Mesh(boilGeo, boilMat)
+    this.boil.renderOrder = 16
+    this.boil.frustumCulled = false
+    this.boil.visible = false
+    scene.add(this.boil)
   }
 
   update(dt: number): void {
@@ -234,6 +268,36 @@ export class WakeSystem {
       this.lastZ = sternZ
       this.points.push({ x: sternX, z: sternZ, dirX, dirZ, age: 0, speed })
       if (this.points.length > MAX_POINTS) this.points.shift()
+    }
+
+    // ---- REAL water displacement: drop wake-wave sources every ~5 m ----
+    const srcMoved = Math.hypot(sternX - this.wakeSrcLastX, sternZ - this.wakeSrcLastZ)
+    if (speed > 3 && srcMoved > 5) {
+      this.wakeSrcLastX = sternX
+      this.wakeSrcLastZ = sternZ
+      this.waveField.pushWakeSource(
+        sternX,
+        sternZ,
+        Math.min(0.22, 0.05 + speed * 0.004),
+      )
+    }
+
+    // ---- transom boil: churning prop wash pinned behind the stern ----
+    const boilTarget = speed > 4 ? Math.min(1, (speed - 4) / 14) : 0
+    this.boilOpacity.value +=
+      (boilTarget * 0.85 - this.boilOpacity.value) * Math.min(1, dt * 5)
+    if (this.boilOpacity.value > 0.02) {
+      const bx = b.x - dirX * 3.4
+      const bz = b.z - dirZ * 3.4
+      this.boil.visible = true
+      this.boil.position.set(
+        bx,
+        this.waveField.heightAt(bx, bz, this.waveField.time) + 0.12,
+        bz,
+      )
+      this.boil.scale.setScalar(1.6 + Math.min(1, speed / 24) * 1.5)
+    } else {
+      this.boil.visible = false
     }
 
     // ---------------------------------------------------- airborne water
@@ -281,8 +345,31 @@ export class WakeSystem {
         )
       }
     }
+    if (speed > 6) {
+      // flat skimming streaks off the hull sides — the white slashes a
+      // planing hull rips across the surface
+      const rate = Math.min(320, speed * 7)
+      this.streakCarry += rate * dt
+      const wy2 = this.waveField.heightAt(b.x, b.z, this.waveField.time)
+      while (this.streakCarry >= 1) {
+        this.streakCarry -= 1
+        const side = this.streakCarry % 2 < 1 ? 1 : -1
+        const back = 0.5 + (this.streakCarry % 5) * 0.55
+        this.streaks.emit(
+          b.x - dirX * back + px0 * side * 1.05,
+          wy2 + 0.12,
+          b.z - dirZ * back + pz0 * side * 1.05,
+          px0 * side * (2.8 + speed * 0.16) - dirX * speed * 0.1,
+          0.6,
+          pz0 * side * (2.8 + speed * 0.16) - dirZ * speed * 0.1,
+          1.8,
+          0.4,
+        )
+      }
+    }
     this.bowSpray.update(dt)
     this.rooster.update(dt)
+    this.streaks.update(dt)
 
     // ------------------------------------------------------ foam ribbons
     const pos = this.geometry.attributes.position as THREE.BufferAttribute
