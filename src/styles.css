@@ -540,6 +540,59 @@ body {
   color: #fff;
 }
 
+/* ---------- mobile controls ---------- */
+#mobile-ui.hidden {
+  display: none;
+}
+.mobile-bar {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 50;
+  display: flex;
+  gap: 8px;
+}
+.mobile-bar button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: #d6efec;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(83, 224, 210, 0.25);
+  background: rgba(8, 22, 26, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mobile-pad {
+  position: fixed;
+  bottom: 64px;
+  right: 16px;
+  z-index: 50;
+  width: 138px;
+  height: 138px;
+  border-radius: 50%;
+  border: 1px solid rgba(83, 224, 210, 0.3);
+  background: rgba(8, 22, 26, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  touch-action: none;
+  user-select: none;
+}
+.mobile-pad.active {
+  display: flex;
+}
+.mobile-pad span {
+  font-size: 9.5px;
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+  padding: 0 14px;
+}
+
 /* ---------- build/phase pill ---------- */
 #phase-pill {
   position: fixed;

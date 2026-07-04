@@ -18,6 +18,8 @@ import { BitcoinPill } from './ui/bitcoinPill'
 import { EventToast } from './ui/eventToast'
 import { DebugPanel } from './ui/debugPanel'
 import { LegendPanel } from './ui/legendPanel'
+import { MobileControls } from './ui/mobileControls'
+import { QualityGovernor } from './core/qualityGovernor'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -150,6 +152,8 @@ async function boot(): Promise<void> {
     cameraPreset: driveMode ? boat.presetName : 'tableau',
   }))
 
+  const governor = new QualityGovernor(renderer)
+
   // event toasts (§28 tone)
   bus.on('whale', ({ btc }) => {
     if (btc >= 300) toast.show(`Whale moved — ${fmtBtc(btc)} BTC`)
@@ -243,6 +247,17 @@ async function boot(): Promise<void> {
     }
     if (e.key === 'Control') input.superBoost = false
     if (e.code === 'Space') input.anchor = false
+  })
+
+  new MobileControls(input, {
+    toggleDrive: () => {
+      driveMode = !driveMode
+      toast.setMode(driveMode ? 'drive' : 'frame')
+      updatePill()
+    },
+    toggleDebug: () => debug.toggle(),
+    toggleLegend: () => legend.toggle(),
+    isDriving: () => driveMode,
   })
 
   // ---------- weather → world application ----------
@@ -376,6 +391,7 @@ async function boot(): Promise<void> {
       fpsFrames = 0
       updatePill()
     }
+    governor.update(rawDt, fps)
 
     if (!firstFrameShown) {
       firstFrameShown = true
