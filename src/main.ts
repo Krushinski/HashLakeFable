@@ -129,11 +129,7 @@ async function boot(): Promise<void> {
     look: new THREE.Vector3(28, 21, -700),
     drift: 1,
   }
-  // Frame-mode look-around (click-drag) offsets
-  let lookYaw = 0
-  let lookPitch = 0
   const curLook = new THREE.Vector3().copy(camRig.look)
-  const tmpBase = new THREE.Vector3()
   const tmpTarget = new THREE.Vector3()
   const tmpDir = new THREE.Vector3()
   const tmpFocus = new THREE.Vector3()
@@ -180,6 +176,7 @@ async function boot(): Promise<void> {
 
   const governor = new QualityGovernor(renderer)
   const minimap = new Minimap(boat)
+  debug.attachMinimap(minimap.el)
 
   // event toasts (§28 tone)
   bus.on('whale', ({ btc }) => {
@@ -269,8 +266,6 @@ async function boot(): Promise<void> {
     if (e.key === 'r' || e.key === 'R') {
       camRig.pos.set(40, 6.5, 470)
       camRig.look.set(28, 21, -700)
-      lookYaw = 0
-      lookPitch = 0
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
@@ -301,34 +296,49 @@ async function boot(): Promise<void> {
     { name: 'Hero Profile Low', off: [58, 2.6, 6], look: [0, 3, 0] },
     { name: 'Three-Quarter Portrait', off: [24, 5.5, 28], look: [0, 2.5, -12] },
     { name: 'Cove Shot', off: [175, 13, -55], look: [0, 6, 0] },
+    // the same cove framing rotated a full 180° — looks back the other way
+    { name: 'Cove Reverse', off: [-175, 13, 55], look: [0, 6, 0] },
   ]
   let frameIndex = 0
   const applyFramePreset = (p: FramePreset) => {
     camRig.pos.set(boat.x + p.off[0], p.off[1], boat.z + p.off[2])
     camRig.look.set(boat.x + p.look[0], p.look[1], boat.z + p.look[2])
-    lookYaw = 0
-    lookPitch = 0
   }
 
-  // ---------- frame-mode look-around (click-drag, §6.1) ----------
+  // ---------- frame-mode look-around (click-drag, §6.1 + user contract:
+  // the drag ORBITS the boat, so the hero stays center-frame while you
+  // swing around it) ----------
   let dragging = false
-  const dragStart = { x: 0, y: 0, yaw: 0, pitch: 0 }
+  const orbitStart = { px: 0, py: 0, yaw: 0, pitch: 0, radius: 60 }
+  const orbitAnchor = new THREE.Vector3()
   renderer.domElement.addEventListener('pointerdown', (e) => {
     if (driveMode) return
     dragging = true
-    dragStart.x = e.clientX
-    dragStart.y = e.clientY
-    dragStart.yaw = lookYaw
-    dragStart.pitch = lookPitch
+    orbitAnchor.set(boat.x, 2.5, boat.z)
+    tmpDir.subVectors(camRig.pos, orbitAnchor)
+    orbitStart.radius = Math.max(12, tmpDir.length())
+    orbitStart.yaw = Math.atan2(tmpDir.x, tmpDir.z)
+    orbitStart.pitch = Math.asin(
+      THREE.MathUtils.clamp(tmpDir.y / orbitStart.radius, -1, 1),
+    )
+    orbitStart.px = e.clientX
+    orbitStart.py = e.clientY
   })
   window.addEventListener('pointermove', (e) => {
     if (!dragging || driveMode) return
-    lookYaw = dragStart.yaw - (e.clientX - dragStart.x) * 0.0022
-    lookPitch = THREE.MathUtils.clamp(
-      dragStart.pitch + (e.clientY - dragStart.y) * 0.0016,
-      -0.42,
-      0.55,
+    const yaw = orbitStart.yaw - (e.clientX - orbitStart.px) * 0.0035
+    const pitch = THREE.MathUtils.clamp(
+      orbitStart.pitch + (e.clientY - orbitStart.py) * 0.0022,
+      0.02,
+      1.15,
     )
+    const r = orbitStart.radius
+    camRig.pos.set(
+      orbitAnchor.x + Math.sin(yaw) * Math.cos(pitch) * r,
+      orbitAnchor.y + Math.sin(pitch) * r,
+      orbitAnchor.z + Math.cos(yaw) * Math.cos(pitch) * r,
+    )
+    camRig.look.set(orbitAnchor.x, orbitAnchor.y + 2, orbitAnchor.z)
   })
   window.addEventListener('pointerup', () => {
     dragging = false
@@ -462,26 +472,24 @@ async function boot(): Promise<void> {
       curLook.set(boat.x, 8, boat.z)
     } else {
       // damped tableau camera — gives the smooth zoom-out when leaving
-      // drive mode, and carries the user's drag look-around
+      // drive mode, and glides between presets / orbit-drag poses
       const blend = 1 - Math.exp(-dt * 2.2)
+      // drift sway is sized for the km-long default gaze; near-orbit
+      // framings need proportionally gentler breathing
+      const drift =
+        camRig.drift *
+        Math.min(1, camRig.pos.distanceTo(camRig.look) / 400)
       tmpTarget.set(
-        camRig.pos.x + Math.sin(t * 0.04) * 10 * camRig.drift,
-        camRig.pos.y + Math.sin(t * 0.1) * 0.4 * camRig.drift,
+        camRig.pos.x + Math.sin(t * 0.04) * 10 * drift,
+        camRig.pos.y + Math.sin(t * 0.1) * 0.4 * drift,
         camRig.pos.z,
       )
       camera.position.lerp(tmpTarget, blend)
 
-      tmpBase.subVectors(camRig.look, camRig.pos)
-      const dist = tmpBase.length()
-      const baseYaw = Math.atan2(tmpBase.x, -tmpBase.z)
-      const basePitch = Math.asin(THREE.MathUtils.clamp(tmpBase.y / dist, -1, 1))
-      const yaw = baseYaw + lookYaw
-      const pitch = THREE.MathUtils.clamp(basePitch + lookPitch, -0.45, 0.6)
       tmpTarget.set(
-        camRig.pos.x + Math.sin(yaw) * Math.cos(pitch) * dist +
-          Math.sin(t * 0.03) * 14 * camRig.drift,
-        camRig.pos.y + Math.sin(pitch) * dist,
-        camRig.pos.z - Math.cos(yaw) * Math.cos(pitch) * dist,
+        camRig.look.x + Math.sin(t * 0.03) * 14 * drift,
+        camRig.look.y,
+        camRig.look.z,
       )
       curLook.lerp(tmpTarget, blend)
       camera.lookAt(curLook)

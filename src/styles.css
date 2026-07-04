@@ -682,13 +682,21 @@ body {
   pointer-events: none;
 }
 
-/* ---------- minimap ---------- */
+/* ---------- minimap (docked at the bottom of the debug panel) ---------- */
+.dbg-map {
+  margin-top: 14px;
+}
+.dbg-map h4 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 0 0 7px;
+  font-weight: 600;
+}
 #minimap {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  z-index: 40;
-  border-radius: 14px;
+  display: block;
+  border-radius: 12px;
   border: 1px solid rgba(69, 200, 192, 0.2);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   opacity: 0.92;

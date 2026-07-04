@@ -26,7 +26,9 @@ export class Speedometer {
     const arcPath = (fracFrom: number, fracTo: number): string => {
       const a0 = ((fracFrom * Speedometer.ARC - 210) * Math.PI) / 180
       const a1 = ((fracTo * Speedometer.ARC - 210) * Math.PI) / 180
-      const large = fracTo - fracFrom > 0.5 ? 1 : 0
+      // large-arc only past 180° of actual sweep (240° dial → frac 0.75);
+      // keying it on frac 0.5 made the boost arc escape through the gap
+      const large = (fracTo - fracFrom) * Speedometer.ARC > 180 ? 1 : 0
       return `M ${c + R * Math.cos(a0)} ${c + R * Math.sin(a0)} A ${R} ${R} 0 ${large} 1 ${
         c + R * Math.cos(a1)
       } ${c + R * Math.sin(a1)}`

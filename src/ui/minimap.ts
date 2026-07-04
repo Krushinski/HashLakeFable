@@ -4,13 +4,15 @@ import type { BoatSystem } from '../scene/boatSystem'
 /**
  * Minimap (§17.5) — the real lake shape (sampled from the same SDF the
  * world uses), glassy dark card, live boat dot with heading. North up.
+ * Lives docked at the bottom of the debug panel (§user), not on the
+ * main page.
  */
 
 const SIZE = 148
 const WORLD = 2100 // world meters spanned edge to edge
 
 export class Minimap {
-  private el: HTMLCanvasElement
+  readonly el: HTMLCanvasElement
   private ctx: CanvasRenderingContext2D
   private bg: ImageData
 
@@ -19,7 +21,6 @@ export class Minimap {
     this.el.id = 'minimap'
     this.el.width = SIZE
     this.el.height = SIZE
-    document.body.appendChild(this.el)
     this.ctx = this.el.getContext('2d')!
 
     // bake the geography once
@@ -68,6 +69,8 @@ export class Minimap {
   }
 
   update(): void {
+    // parked inside the (hidden) debug panel → offsetParent is null → skip
+    if (this.el.offsetParent === null) return
     this.ctx.putImageData(this.bg, 0, 0)
     const i = (this.boat.x / WORLD + 0.5) * (SIZE - 1)
     const j = (this.boat.z / WORLD + 0.5) * (SIZE - 1)
