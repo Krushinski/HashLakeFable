@@ -12,21 +12,102 @@ import {
   vec3,
   mx_noise_float,
 } from 'three/tsl'
-import { fbm2 } from '../core/noise'
+import { fbm2, valueNoise2 } from '../core/noise'
 import { bedHeight, shoreSdf } from './lakeMap'
 
 /**
- * The land. Heights come from the same lakeMap functions the water reads,
- * so shore and water can never disagree — inside the lake this mesh IS the
- * visible bed under the shallows (sand through turquoise, brief §10.1/10.2).
+ * The land — from lakebed sand to hero peaks, one height function.
  *
- * Phase 1 ships correct geography with honest-but-simple shading: wet/dry
- * sand bands, meadow grass, rising ground. The hero terrain/mountain art
- * pass (Phases 3 & 5) builds on exactly this surface.
+ * Composition follows the Inspiration-2 contract (§8/§11): water →
+ * shoreline → meadow shelf → climbing forest land → foothills → the hero
+ * mountain range standing far back on the north side, never a ring hugging
+ * the lake. South/east/west stay lower and rolling.
+ *
+ * Heights inside the lake ARE the visible bed under the shallows — the
+ * same lakeMap functions the water reads, so land and water can never
+ * disagree.
  */
 
-const DOMAIN = 4096
-const CELLS = 384
+const DOMAIN = 5120
+const CELLS = 448
+
+interface Ridge {
+  x1: number
+  z1: number
+  h1: number
+  x2: number
+  z2: number
+  h2: number
+  r: number // half-width of the ridge flank
+}
+
+/**
+ * The hero range as connected RIDGE SEGMENTS — mountains are chains with
+ * saddles and sharp crests, never radial gumdrops (§11.3).
+ */
+const RIDGES: Ridge[] = [
+  // centerpiece massif: steep pyramid with shoulders
+  { x1: -420, z1: -1720, h1: 520, x2: -120, z2: -1880, h2: 820, r: 340 },
+  { x1: -120, z1: -1880, h1: 820, x2: 260, z2: -1760, h2: 560, r: 320 },
+  // east spur descending toward the cove side
+  { x1: 260, z1: -1760, h1: 560, x2: 780, z2: -1620, h2: 660, r: 330 },
+  { x1: 780, z1: -1620, h1: 660, x2: 1350, z2: -1420, h2: 380, r: 300 },
+  // west wall
+  { x1: -420, z1: -1720, h1: 520, x2: -980, z2: -1600, h2: 640, r: 330 },
+  { x1: -980, z1: -1600, h1: 640, x2: -1520, z2: -1380, h2: 360, r: 300 },
+  // far back-range: taller, hazier, filling the horizon gaps
+  { x1: -700, z1: -2350, h1: 760, x2: 60, z2: -2450, h2: 900, r: 480 },
+  { x1: 60, z1: -2450, h1: 900, x2: 800, z2: -2250, h2: 700, r: 440 },
+]
+
+function ridgedNoise(x: number, z: number, seed: number): number {
+  let amp = 1
+  let freq = 1
+  let sum = 0
+  let norm = 0
+  for (let i = 0; i < 5; i++) {
+    const n = 1 - Math.abs(valueNoise2(x * freq, z * freq, seed + i * 37))
+    sum += n * n * amp
+    norm += amp
+    amp *= 0.55
+    freq *= 2.1
+  }
+  return sum / norm // 0..1
+}
+
+function mountainHeight(x: number, z: number): number {
+  let h = 0
+  for (const rg of RIDGES) {
+    // distance to the ridge segment + parameter along it
+    const ax = x - rg.x1
+    const az = z - rg.z1
+    const bx = rg.x2 - rg.x1
+    const bz = rg.z2 - rg.z1
+    const len2 = bx * bx + bz * bz
+    let t = (ax * bx + az * bz) / len2
+    t = Math.max(0, Math.min(1, t))
+    const px = rg.x1 + bx * t
+    const pz = rg.z1 + bz * t
+    const d = Math.hypot(x - px, z - pz) / rg.r
+    if (d > 2.6) continue
+
+    // crest height along the segment, dipping into saddles mid-span
+    const crest =
+      (rg.h1 + (rg.h2 - rg.h1) * t) *
+      (1 - 0.18 * Math.sin(t * Math.PI) * (rg.h1 > 400 && rg.h2 > 400 ? 1 : 0))
+
+    // sharp flank profile — steep near the crest, easing at the skirt
+    const flank = Math.pow(Math.max(0, 1 - d / 2.6), 1.8)
+
+    // carve with ridged noise: strong crest articulation + rocky detail
+    const macro = ridgedNoise(x * 0.0011, z * 0.0011, 913)
+    const micro = ridgedNoise(x * 0.0048, z * 0.0048, 407)
+    const carved = crest * flank * (0.52 + 0.38 * macro + 0.22 * micro)
+
+    h = Math.max(h, carved)
+  }
+  return h
+}
 
 export function terrainHeight(x: number, z: number): number {
   const sdf = shoreSdf(x, z)
@@ -35,25 +116,33 @@ export function terrainHeight(x: number, z: number): number {
     return bedHeight(x, z)
   }
 
-  // Shore shelf: gentle rise off the waterline so beaches feel walkable,
-  // then meadows, then broad foothill swell toward the domain edge.
+  // Shore shelf: gentle walkable rise, then meadow.
   const shelf = Math.min(1, sdf / 420)
   let h = 0.25 + 4.2 * Math.pow(shelf, 1.35)
 
-  // Rolling meadow relief that stays quiet near the beach pockets.
   h +=
     fbm2(x * 0.0022, z * 0.0022, { octaves: 4, seed: 77 }) *
-    2.4 *
+    2.6 *
     Math.min(1, sdf / 90)
 
-  // Broad rise toward the north (mountain side, -Z) — placeholder for the
-  // Phase 3 foothills so the horizon already reads as rising land.
-  const north = Math.min(1, Math.max(0, (-z - 500) / 1200))
-  h += north * north * 90
+  // Foothills climbing toward the north range.
+  const north = Math.min(1, Math.max(0, (-z - 620) / 900))
+  h += north * north * 130
+  h +=
+    north *
+    fbm2(x * 0.0012, z * 0.0012, { octaves: 3, seed: 55 }) *
+    46 *
+    north
 
-  // Soft rise at the far south/east/west so the lake sits in a basin.
-  const edge = Math.min(1, Math.max(0, (Math.hypot(x, z) - 1500) / 900))
-  h += edge * edge * 40
+  // Hero mountains (north) — blended over the foothills.
+  h = Math.max(h, mountainHeight(x, z))
+
+  // Rolling rises on the other sides so the basin feels cradled.
+  const radial = Math.hypot(x, z - 40)
+  const edge = Math.min(1, Math.max(0, (radial - 1350) / 1000))
+  const southish = Math.max(0, z / Math.max(radial, 1))
+  h += edge * edge * (55 + 60 * southish) *
+    (0.7 + 0.6 * fbm2(x * 0.0016, z * 0.0016, { octaves: 3, seed: 99 }))
 
   return h
 }
@@ -76,71 +165,104 @@ export class TerrainSystem {
     geo.setAttribute('shoreDist', new THREE.BufferAttribute(shore, 1))
     geo.computeVertexNormals()
 
+    // slope from the computed normals: 0 flat → 1 vertical
+    const geoNormal = geo.attributes.normal as THREE.BufferAttribute
+    const slopes = new Float32Array(pos.count)
+    for (let i = 0; i < pos.count; i++) {
+      slopes[i] = 1 - geoNormal.getY(i)
+    }
+    geo.setAttribute('slope', new THREE.BufferAttribute(slopes, 1))
+
     const material = new THREE.MeshStandardNodeMaterial()
-    material.roughness = 0.96
+    material.roughness = 0.95
     material.metalness = 0
 
     const vShore = varying(float(0), 'vShoreDist')
     const vHeight = varying(float(0), 'vTerrainHeight')
+    const vSlope = varying(float(0), 'vSlope')
 
     material.positionNode = Fn(() => {
-      vShore.assign(attribute('shoreDist', 'float'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vShore.assign(float(attribute('shoreDist', 'float') as any))
       vHeight.assign(positionLocal.y)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vSlope.assign(float(attribute('slope', 'float') as any))
       return positionLocal
     })()
 
     material.colorNode = Fn(() => {
       const worldXZ = vec2(positionLocal.x, positionLocal.z)
-      const grain = mx_noise_float(vec3(worldXZ.mul(0.05), 7.7))
-      const patch = mx_noise_float(vec3(worldXZ.mul(0.006), 3.1))
+      const grain = mx_noise_float(vec3(worldXZ.mul(0.045), 7.7))
+      const patch = mx_noise_float(vec3(worldXZ.mul(0.004), 3.1))
+      const macro = mx_noise_float(vec3(worldXZ.mul(0.0008), 12.9))
 
-      // Underwater bed → damp sand → dry sand → grass → high meadow.
-      const bedDeep = color(0x233020)
-      const bedSand = color(0xbfae8a)
-      const dampSand = color(0x9a8b6d)
-      const drySand = color(0xd8cba6)
-      const grass = color(0x55743d)
-      const grassDark = color(0x3c5730)
-      const high = color(0x4a5c3c)
+      // palette
+      const bedDeep = color(0x1e2b1a)
+      const bedSand = color(0xb8a67f)
+      const dampSand = color(0x8f8064)
+      const drySand = color(0xd3c49d)
+      const grassLush = color(0x4e7038)
+      const grassDeep = color(0x35522c)
+      const meadowDry = color(0x6d7f42)
+      const forestFloor = color(0x2c4526)
+      const rockLight = color(0x8d8578)
+      const rockDark = color(0x4f4a42)
+      const snow = color(0xeef2f4)
 
-      // Below water: sand shallows darkening with depth.
+      // lakebed
       const bed = mix(
         bedSand,
         bedDeep,
         smoothstep(float(-2), float(-9), vHeight),
       )
 
-      // Wet band just above the waterline, then dry sand pockets.
+      // beach band — narrow, pocketed by noise so it isn't a uniform rim
       const beach = mix(
         dampSand,
         drySand,
-        smoothstep(float(0.15), float(1.1), vHeight),
+        smoothstep(float(0.12), float(0.9), vHeight),
       )
 
-      // Grass takes over a few meters up-shore; patchy tone variation.
-      const meadow = mix(
-        grass,
-        grassDark,
-        patch.mul(0.5).add(0.5),
+      // meadow: lush near shore, drier + patchier with altitude
+      const grass = mix(
+        mix(grassLush, grassDeep, patch.mul(0.5).add(0.5)),
+        meadowDry,
+        macro.mul(0.5).add(0.5).mul(0.55),
       )
       const upland = mix(
-        meadow,
-        high,
-        smoothstep(float(25), float(90), vHeight),
+        grass,
+        forestFloor,
+        smoothstep(float(60), float(220), vHeight),
       )
 
-      const land = mix(
+      // rock takes over on slopes and altitude; banded striations
+      const stria = mx_noise_float(
+        vec3(worldXZ.x.mul(0.02), vHeight.mul(0.055), worldXZ.y.mul(0.02)),
+      )
+      const rock = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
+
+      const slopeRock = smoothstep(float(0.35), float(0.62), vSlope)
+      const altRock = smoothstep(float(210), float(330), vHeight)
+      const rockMask = slopeRock.max(altRock)
+
+      // snow on high, flatter faces — selective caps, not icing
+      const snowMask = smoothstep(float(470), float(600), vHeight).mul(
+        float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)),
+      )
+
+      const beachToGrass = mix(
         beach,
         upland,
-        smoothstep(float(4), float(16), vShore),
+        smoothstep(float(3), float(14), vShore).mul(
+          smoothstep(float(0.25), float(1.6), vHeight),
+        ),
       )
-      const ground = mix(
-        bed,
-        land,
-        smoothstep(float(-0.4), float(0.3), vHeight),
-      )
+      let ground = mix(bed, beachToGrass,
+        smoothstep(float(-0.35), float(0.25), vHeight))
+      ground = mix(ground, rock, rockMask)
+      ground = mix(ground, snow, snowMask)
 
-      return ground.mul(grain.mul(0.1).add(0.95))
+      return ground.mul(grain.mul(0.12).add(0.94))
     })()
 
     this.mesh = new THREE.Mesh(geo, material)

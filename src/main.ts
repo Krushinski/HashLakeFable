@@ -8,6 +8,7 @@ import { WaveField } from './scene/waveField'
 import { WaterSystem } from './scene/waterSystem'
 import { TerrainSystem } from './scene/terrainSystem'
 import { ForestSystem } from './scene/forestSystem'
+import { CloudSystem } from './scene/cloudSystem'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -71,8 +72,8 @@ async function boot(): Promise<void> {
 
   // ---------- scene ----------
   const scene = new THREE.Scene()
-  // Alpine air: crisp near field, gentle aerial perspective far out.
-  scene.fog = new THREE.Fog(0xcfdad2, 2100, 7000)
+  // Alpine air: crisp near field, real aerial perspective on the far range.
+  scene.fog = new THREE.Fog(0xcfdad2, 1700, 5600)
 
   const sky = new SkySystem(renderer, scene)
   const waveField = new WaveField(20)
@@ -80,6 +81,7 @@ async function boot(): Promise<void> {
   new TerrainSystem(scene)
   const forest = new ForestSystem(scene)
   forest.load().catch((err) => console.error('forest load failed:', err))
+  const clouds = new CloudSystem(scene)
 
   sky.bakeEnvironment()
 
@@ -92,9 +94,11 @@ async function boot(): Promise<void> {
     12000,
   )
   // Live-tunable camera rig (drift oscillates around these).
+  // Default tableau: low over the southern water, looking north across the
+  // full fetch at the hero range — the 000_INSPIRATION geometry.
   const camRig = {
-    pos: new THREE.Vector3(120, 6.5, 740),
-    look: new THREE.Vector3(210, 12, 400),
+    pos: new THREE.Vector3(40, 6, 620),
+    look: new THREE.Vector3(-30, 30, -900),
     drift: 1,
   }
   camera.position.copy(camRig.pos)
@@ -165,6 +169,7 @@ async function boot(): Promise<void> {
     const t = clock.elapsedTime
 
     water.update(dt)
+    clouds.update(dt)
 
     // Slow cinematic drift around the rig.
     camera.position.set(
