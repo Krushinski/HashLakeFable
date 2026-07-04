@@ -7,6 +7,7 @@ import { SkySystem } from './scene/skySystem'
 import { WaveField } from './scene/waveField'
 import { WaterSystem } from './scene/waterSystem'
 import { TerrainSystem } from './scene/terrainSystem'
+import { ForestSystem } from './scene/forestSystem'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -77,6 +78,8 @@ async function boot(): Promise<void> {
   const waveField = new WaveField(20)
   const water = new WaterSystem(scene, waveField, sky)
   new TerrainSystem(scene)
+  const forest = new ForestSystem(scene)
+  forest.load().catch((err) => console.error('forest load failed:', err))
 
   sky.bakeEnvironment()
 
@@ -88,8 +91,14 @@ async function boot(): Promise<void> {
     0.3,
     12000,
   )
-  camera.position.set(60, 5.5, 640)
-  camera.lookAt(-40, 12, -400)
+  // Live-tunable camera rig (drift oscillates around these).
+  const camRig = {
+    pos: new THREE.Vector3(120, 6.5, 740),
+    look: new THREE.Vector3(210, 12, 400),
+    drift: 1,
+  }
+  camera.position.copy(camRig.pos)
+  camera.lookAt(camRig.look)
 
   // ---------- post ----------
   const PipelineCtor =
@@ -139,11 +148,15 @@ async function boot(): Promise<void> {
 
   // Live-debug handle (console-only; no UI surface).
   ;(window as unknown as Record<string, unknown>).__HL = {
+    THREE,
     renderer,
     scene,
     sky,
     waveField,
     water,
+    forest,
+    camera,
+    camRig,
   }
 
   renderer.setAnimationLoop(() => {
@@ -153,10 +166,17 @@ async function boot(): Promise<void> {
 
     water.update(dt)
 
-    // Slow cinematic drift.
-    camera.position.x = 60 + Math.sin(t * 0.04) * 18
-    camera.position.y = 5.5 + Math.sin(t * 0.1) * 0.5
-    camera.lookAt(-40 + Math.sin(t * 0.03) * 30, 12, -400)
+    // Slow cinematic drift around the rig.
+    camera.position.set(
+      camRig.pos.x + Math.sin(t * 0.04) * 10 * camRig.drift,
+      camRig.pos.y + Math.sin(t * 0.1) * 0.4 * camRig.drift,
+      camRig.pos.z,
+    )
+    camera.lookAt(
+      camRig.look.x + Math.sin(t * 0.03) * 18 * camRig.drift,
+      camRig.look.y,
+      camRig.look.z,
+    )
 
     post.render()
 

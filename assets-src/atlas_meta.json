@@ -1,0 +1,14 @@
+{
+ "tileA_top": {
+  "ortho_scale": 3.2
+ },
+ "tileB_top": {
+  "ortho_scale": 2.1
+ },
+ "tileC_top": {
+  "ortho_scale": 1.3
+ },
+ "tileA_side": {
+  "ortho_scale": 3.2
+ }
+}
