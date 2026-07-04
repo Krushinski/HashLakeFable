@@ -1,0 +1,250 @@
+/* ---------- base ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --hl-ink: #04090b;
+  --hl-deep: #0a1a1e;
+  --hl-teal: #45c8c0;
+  --hl-teal-dim: #1e6f6b;
+  --hl-cyan-mute: #8fb8bc;
+  --hl-white: #eaf4f4;
+  --hl-signal: #6ef2a3;
+  --hl-font:
+    'Inter', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--hl-ink);
+  color: var(--hl-white);
+  font-family: var(--hl-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app,
+#app canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* ---------- loading screen ---------- */
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  background:
+    radial-gradient(
+      ellipse 130% 90% at 50% 62%,
+      rgba(20, 62, 66, 0.55) 0%,
+      rgba(7, 20, 23, 0.9) 46%,
+      var(--hl-ink) 100%
+    ),
+    var(--hl-ink);
+  opacity: 1;
+  transition: opacity 1.6s ease;
+}
+
+#loader.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loader-mark {
+  font-size: clamp(1.7rem, 4.6vw, 2.9rem);
+  font-weight: 200;
+  letter-spacing: 0.52em;
+  text-indent: 0.52em; /* optically recenter the tracked-out text */
+  color: var(--hl-white);
+  text-shadow: 0 0 34px rgba(69, 200, 192, 0.35);
+  user-select: none;
+}
+
+.loader-sub {
+  font-size: clamp(0.72rem, 1.6vw, 0.86rem);
+  font-weight: 300;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  color: var(--hl-cyan-mute);
+  opacity: 0.85;
+  animation: loader-breathe 4.2s ease-in-out infinite;
+}
+
+@keyframes loader-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* concentric signal ripples behind the wordmark */
+.loader-rings {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.loader-rings span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(69, 200, 192, 0.55);
+  animation: loader-ripple 5.6s cubic-bezier(0.16, 0.6, 0.4, 1) infinite;
+}
+
+.loader-rings span:nth-child(2) {
+  animation-delay: 1.4s;
+}
+.loader-rings span:nth-child(3) {
+  animation-delay: 2.8s;
+}
+.loader-rings span:nth-child(4) {
+  animation-delay: 4.2s;
+}
+
+@keyframes loader-ripple {
+  0% {
+    width: 12px;
+    height: 12px;
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.8;
+  }
+  100% {
+    width: min(74vmin, 640px);
+    height: min(74vmin, 640px);
+    opacity: 0;
+  }
+}
+
+/* heartbeat signal line */
+.loader-signal {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.4rem;
+}
+
+.loader-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hl-signal);
+  box-shadow: 0 0 10px rgba(110, 242, 163, 0.9);
+  animation: loader-pulse 3.4s ease-in-out infinite;
+}
+
+.loader-line {
+  display: block;
+  width: clamp(90px, 18vw, 160px);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(110, 242, 163, 0.65),
+    rgba(69, 200, 192, 0.25) 55%,
+    transparent
+  );
+  transform-origin: left center;
+  animation: loader-sweep 3.4s ease-in-out infinite;
+}
+
+@keyframes loader-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  12% {
+    transform: scale(1.7);
+    opacity: 1;
+  }
+  24% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+}
+
+@keyframes loader-sweep {
+  0%,
+  100% {
+    transform: scaleX(0.35);
+    opacity: 0.35;
+  }
+  12% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  60% {
+    transform: scaleX(0.6);
+    opacity: 0.5;
+  }
+}
+
+/* loader in fallback state (no WebGPU/WebGL2) */
+#loader.fallback .loader-rings span {
+  animation-play-state: paused;
+  opacity: 0.12;
+}
+
+#loader.fallback .loader-sub {
+  animation: none;
+  opacity: 0.95;
+  text-transform: none;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  line-height: 1.8;
+  max-width: 34rem;
+  text-align: center;
+  padding: 0 1.4rem;
+}
+
+/* ---------- build/phase pill ---------- */
+#phase-pill {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 40;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: rgba(214, 236, 235, 0.82);
+  background: rgba(8, 22, 25, 0.55);
+  border: 1px solid rgba(69, 200, 192, 0.16);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  user-select: none;
+  pointer-events: none;
+}

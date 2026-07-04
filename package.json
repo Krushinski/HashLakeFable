@@ -1,0 +1,20 @@
+{
+  "name": "hashlake",
+  "private": true,
+  "version": "5.0.0",
+  "type": "module",
+  "description": "HashLake — a living, drivable Bitcoin alpine-lake artwork. WebGPU-first, museum-grade.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "0.185.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.0",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.0"
+  }
+}

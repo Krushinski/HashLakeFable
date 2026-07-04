@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#04090b" />
+    <meta
+      name="description"
+      content="HashLake — a living alpine lake where the Bitcoin network becomes weather, water, and light. Watch it like wall art, or drive the boat."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2304090b'/%3E%3Ccircle cx='32' cy='32' r='7' fill='none' stroke='%2345c8c0' stroke-width='2.5'/%3E%3Ccircle cx='32' cy='32' r='15' fill='none' stroke='%2345c8c0' stroke-opacity='0.45' stroke-width='2'/%3E%3Ccircle cx='32' cy='32' r='23' fill='none' stroke='%2345c8c0' stroke-opacity='0.18' stroke-width='1.5'/%3E%3C/svg%3E"
+    />
+    <title>HashLake</title>
+  </head>
+  <body>
+    <div id="loader" aria-live="polite">
+      <div class="loader-rings" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <h1 class="loader-mark">HASHLAKE</h1>
+      <p class="loader-sub" id="loader-sub">Listening to the chain.</p>
+      <div class="loader-signal" aria-hidden="true">
+        <span class="loader-dot"></span>
+        <span class="loader-line"></span>
+      </div>
+    </div>
+    <div id="phase-pill" hidden></div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
