@@ -33,6 +33,30 @@ export interface DriveInput {
   anchor: boolean
 }
 
+/** Deep-red flag with a white bitcoin mark, drawn once on a canvas. */
+function makeFlagTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const g = c.getContext('2d')!
+  g.fillStyle = '#8a1016'
+  g.fillRect(0, 0, 256, 128)
+  g.fillStyle = '#f4efe8'
+  g.font = '700 88px Georgia, "Times New Roman", serif'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillText('B', 128, 68)
+  // the ₿ bars above and below the stem
+  g.fillRect(109, 6, 8, 20)
+  g.fillRect(127, 6, 8, 20)
+  g.fillRect(109, 102, 8, 20)
+  g.fillRect(127, 102, 8, 20)
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  return tex
+}
+
 export interface DriveCameraPreset {
   name: string
   back: number
@@ -124,6 +148,9 @@ export class BoatSystem {
   /** Flag cloth sway — distance-weighted sine ripple, wind/speed driven. */
   private riggedFlag(mesh: THREE.Mesh): void {
     const mat = mesh.material as THREE.MeshStandardNodeMaterial
+    // white ₿ on the deep red field (canvas texture, zero assets)
+    mat.map = makeFlagTexture()
+    mat.color.set(0xffffff)
     const t = this.waveField.uTime
     const wind = this.uFlagWind
     mat.positionNode = Fn(() => {
