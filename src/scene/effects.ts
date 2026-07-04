@@ -13,7 +13,8 @@ import { seededRandom } from '../core/noise'
 
 const RING_POOL = 10
 const SPLASH_POOL = 4
-const SPRAY_COUNT = 90
+const SPRAY_COUNT = 150
+const PATCH_POOL = 5
 
 interface Ring {
   mesh: THREE.Mesh
@@ -37,9 +38,19 @@ interface Splash {
   origin: THREE.Vector3
 }
 
+interface FoamPatch {
+  mesh: THREE.Mesh
+  mat: THREE.MeshBasicMaterial
+  age: number
+  life: number
+  radius: number
+  active: boolean
+}
+
 export class EffectsSystem {
   private rings: Ring[] = []
   private splashes: Splash[] = []
+  private patches: FoamPatch[] = []
   private rand = seededRandom(31337)
 
   constructor(
@@ -49,7 +60,7 @@ export class EffectsSystem {
   ) {
     // ring pool — flat annulus, additive, fades out
     for (let i = 0; i < RING_POOL; i++) {
-      const geo = new THREE.RingGeometry(0.92, 1.0, 64)
+      const geo = new THREE.RingGeometry(0.85, 1.0, 64)
       geo.rotateX(-Math.PI / 2)
       const mat = new THREE.MeshBasicMaterial({
         color: 0xbfeee8,
@@ -106,6 +117,25 @@ export class EffectsSystem {
       })
     }
 
+    // foam patch pool — the churned water that lingers after a breach
+    for (let i = 0; i < PATCH_POOL; i++) {
+      const geo = new THREE.CircleGeometry(1, 48)
+      geo.rotateX(-Math.PI / 2)
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xdcf1ea,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.visible = false
+      mesh.renderOrder = 19
+      scene.add(mesh)
+      this.patches.push({
+        mesh, mat, age: 0, life: 0, radius: 10, active: false,
+      })
+    }
+
     bus.on('whale', ({ btc }) => this.whaleSplash(btc))
     bus.on('newBlock', () => this.blockPulse())
   }
@@ -137,6 +167,17 @@ export class EffectsSystem {
         speed: 10 + scale * 5,
         life: 3.6 + scale * 1.3,
       })
+    }
+
+    // lingering foam patch under the breach
+    const patch = this.patches.find((p) => !p.active)
+    if (patch) {
+      patch.mesh.position.set(x, y + 0.12, z)
+      patch.age = 0
+      patch.life = 5.5 + scale * 2.5
+      patch.radius = 7 + scale * 9
+      patch.active = true
+      patch.mesh.visible = true
     }
 
     // spray crown
@@ -260,6 +301,23 @@ export class EffectsSystem {
       }
       pos.needsUpdate = true
       s.mat.opacity = 0.95 * (1 - lifeT * lifeT)
+    }
+
+    for (const p of this.patches) {
+      if (!p.active) continue
+      p.age += dt
+      const lifeT = p.age / p.life
+      if (lifeT >= 1) {
+        p.active = false
+        p.mesh.visible = false
+        continue
+      }
+      // blooms fast, then slowly dissolves back into the lake
+      const grow = 1 - Math.pow(1 - Math.min(1, lifeT * 3.5), 2)
+      p.mesh.scale.setScalar(Math.max(0.01, p.radius * (0.5 + grow * 0.5)))
+      p.mat.opacity = 0.42 * (1 - lifeT) * (1 - lifeT)
+      p.mesh.position.y =
+        this.waveField.heightAt(p.mesh.position.x, p.mesh.position.z) + 0.12
     }
   }
 }
