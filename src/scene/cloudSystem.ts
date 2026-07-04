@@ -65,6 +65,7 @@ export class CloudSystem {
   readonly group = new THREE.Group()
   private readonly clouds: CloudSprite[] = []
   private readonly materials: THREE.SpriteMaterial[] = []
+  private readonly deckMaterials: THREE.SpriteMaterial[] = []
 
   constructor(scene: THREE.Scene, count = 18) {
     const rand = seededRandom(7042026)
@@ -73,6 +74,30 @@ export class CloudSystem {
       makeCloudTexture(2),
       makeCloudTexture(3),
     ]
+
+    // storm deck: low, wide, dark stratus layer that fades in with skyDark
+    for (let i = 0; i < 9; i++) {
+      const material = new THREE.SpriteMaterial({
+        map: textures[i % 3],
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        fog: false,
+        color: 0x2a2f34,
+      })
+      this.deckMaterials.push(material)
+      const sprite = new THREE.Sprite(material)
+      const ang = rand() * Math.PI * 2
+      const rad = 500 + rand() * 1600
+      const w = 1400 + rand() * 900
+      sprite.scale.set(w, w * 0.22, 1)
+      sprite.position.set(
+        Math.sin(ang) * rad,
+        380 + rand() * 130,
+        Math.cos(ang) * rad,
+      )
+      this.group.add(sprite)
+    }
 
     for (let i = 0; i < count; i++) {
       const tex = textures[Math.floor(rand() * textures.length)]
@@ -111,6 +136,9 @@ export class CloudSystem {
         1,
         (m.userData.baseOpacity as number) * opacityScale,
       )
+    }
+    for (const m of this.deckMaterials) {
+      m.opacity = Math.min(0.92, darkness * 1.05)
     }
   }
 

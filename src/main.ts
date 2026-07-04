@@ -11,6 +11,9 @@ import { ForestSystem } from './scene/forestSystem'
 import { CloudSystem } from './scene/cloudSystem'
 import { BoatSystem, type DriveInput } from './scene/boatSystem'
 import { EffectsSystem } from './scene/effects'
+import { RainSystem } from './scene/rainSystem'
+import { LightningSystem } from './scene/lightningSystem'
+import { FireSkySystem } from './scene/fireSkySystem'
 import { LiveBitcoinStore } from './state/liveBitcoinStore'
 import { WeatherEngine } from './state/weatherEngine'
 import { bus } from './state/eventBus'
@@ -92,6 +95,9 @@ async function boot(): Promise<void> {
   const boat = new BoatSystem(scene, waveField)
   boat.load().catch((err) => console.error('boat load failed:', err))
   const effects = new EffectsSystem(scene, waveField, boat)
+  const rain = new RainSystem(scene, renderer)
+  const lightning = new LightningSystem(scene)
+  const fireSky = new FireSkySystem(scene)
 
   sky.bakeEnvironment()
 
@@ -120,6 +126,9 @@ async function boot(): Promise<void> {
   const curLook = new THREE.Vector3().copy(camRig.look)
   const tmpBase = new THREE.Vector3()
   const tmpTarget = new THREE.Vector3()
+  const tmpDir = new THREE.Vector3()
+  const tmpFocus = new THREE.Vector3()
+  let baseExposure = 0.5
   // restore saved tableau
   try {
     const saved = JSON.parse(localStorage.getItem(TABLEAU_KEY) ?? 'null')
@@ -312,7 +321,7 @@ async function boot(): Promise<void> {
 
     sky.sky.turbidity.value = lerpAnchors(TIER_VISUALS.turbidity, t)
     sky.sky.rayleigh.value = lerpAnchors(TIER_VISUALS.rayleigh, t)
-    renderer.toneMappingExposure =
+    baseExposure =
       lerpAnchors(TIER_VISUALS.exposure, t) * (1 - d.skyDark * 0.35)
     sky.sunLight.intensity =
       lerpAnchors(TIER_VISUALS.sunIntensity, t) * (1 - d.skyDark * 0.6)
@@ -397,6 +406,13 @@ async function boot(): Promise<void> {
     boat.update(dt, driveMode ? input : null)
     effects.update(dt)
 
+    // storm theater
+    if (driveMode) tmpFocus.set(boat.x, 0, boat.z)
+    else tmpFocus.copy(camRig.pos)
+    rain.update(dt, tmpFocus, weather.dials.rain, weather.dials.wind)
+    lightning.update(dt, weather.dials.lightning, boat.x, boat.z)
+    fireSky.update(dt, weather.dials.fireWeather, tmpFocus)
+
     if (driveMode) {
       boat.driveCamera(camera, dt)
       // keep frame-mode look target primed so exit glides, not snaps
@@ -427,6 +443,11 @@ async function boot(): Promise<void> {
       curLook.lerp(tmpTarget, blend)
       camera.lookAt(curLook)
     }
+
+    // "heavenly blinding" fix: ease exposure down when facing the sun
+    camera.getWorldDirection(tmpDir)
+    const facing = Math.max(0, tmpDir.dot(sky.sunDirection))
+    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.26)
 
     post.render()
 
