@@ -1,0 +1,786 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HashLake HUD mockup</title>
+<style>
+/* ---------- base ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --hl-ink: #04090b;
+  --hl-deep: #0a1a1e;
+  --hl-teal: #45c8c0;
+  --hl-teal-dim: #1e6f6b;
+  --hl-cyan-mute: #8fb8bc;
+  --hl-white: #eaf4f4;
+  --hl-signal: #6ef2a3;
+  --hl-font:
+    'Inter', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--hl-ink);
+  color: var(--hl-white);
+  font-family: var(--hl-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app,
+#app canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* ---------- loading screen ---------- */
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  background:
+    radial-gradient(
+      ellipse 130% 90% at 50% 62%,
+      rgba(20, 62, 66, 0.55) 0%,
+      rgba(7, 20, 23, 0.9) 46%,
+      var(--hl-ink) 100%
+    ),
+    var(--hl-ink);
+  opacity: 1;
+  transition: opacity 1.6s ease;
+}
+
+#loader.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loader-mark {
+  font-size: clamp(1.7rem, 4.6vw, 2.9rem);
+  font-weight: 200;
+  letter-spacing: 0.52em;
+  text-indent: 0.52em; /* optically recenter the tracked-out text */
+  color: var(--hl-white);
+  text-shadow: 0 0 34px rgba(69, 200, 192, 0.35);
+  user-select: none;
+}
+
+.loader-sub {
+  font-size: clamp(0.72rem, 1.6vw, 0.86rem);
+  font-weight: 300;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  color: var(--hl-cyan-mute);
+  opacity: 0.85;
+  animation: loader-breathe 4.2s ease-in-out infinite;
+}
+
+@keyframes loader-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* concentric signal ripples behind the wordmark */
+.loader-rings {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.loader-rings span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(69, 200, 192, 0.55);
+  animation: loader-ripple 5.6s cubic-bezier(0.16, 0.6, 0.4, 1) infinite;
+}
+
+.loader-rings span:nth-child(2) {
+  animation-delay: 1.4s;
+}
+.loader-rings span:nth-child(3) {
+  animation-delay: 2.8s;
+}
+.loader-rings span:nth-child(4) {
+  animation-delay: 4.2s;
+}
+
+@keyframes loader-ripple {
+  0% {
+    width: 12px;
+    height: 12px;
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.8;
+  }
+  100% {
+    width: min(74vmin, 640px);
+    height: min(74vmin, 640px);
+    opacity: 0;
+  }
+}
+
+/* heartbeat signal line */
+.loader-signal {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.4rem;
+}
+
+.loader-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hl-signal);
+  box-shadow: 0 0 10px rgba(110, 242, 163, 0.9);
+  animation: loader-pulse 3.4s ease-in-out infinite;
+}
+
+.loader-line {
+  display: block;
+  width: clamp(90px, 18vw, 160px);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(110, 242, 163, 0.65),
+    rgba(69, 200, 192, 0.25) 55%,
+    transparent
+  );
+  transform-origin: left center;
+  animation: loader-sweep 3.4s ease-in-out infinite;
+}
+
+@keyframes loader-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  12% {
+    transform: scale(1.7);
+    opacity: 1;
+  }
+  24% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+}
+
+@keyframes loader-sweep {
+  0%,
+  100% {
+    transform: scaleX(0.35);
+    opacity: 0.35;
+  }
+  12% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  60% {
+    transform: scaleX(0.6);
+    opacity: 0.5;
+  }
+}
+
+/* loader in fallback state (no WebGPU/WebGL2) */
+#loader.fallback .loader-rings span {
+  animation-play-state: paused;
+  opacity: 0.12;
+}
+
+#loader.fallback .loader-sub {
+  animation: none;
+  opacity: 0.95;
+  text-transform: none;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  line-height: 1.8;
+  max-width: 34rem;
+  text-align: center;
+  padding: 0 1.4rem;
+}
+
+/* ---------- bitcoin pill ---------- */
+#btc-pill {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+  color: rgba(226, 243, 241, 0.92);
+  background: rgba(7, 20, 23, 0.6);
+  border: 1px solid rgba(69, 200, 192, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #555;
+}
+.pill-dot.green {
+  background: var(--hl-signal);
+  box-shadow: 0 0 8px rgba(110, 242, 163, 0.8);
+}
+.pill-dot.yellow {
+  background: #e8c35a;
+  box-shadow: 0 0 8px rgba(232, 195, 90, 0.7);
+}
+.pill-dot.red {
+  background: #e05a4e;
+  box-shadow: 0 0 8px rgba(224, 90, 78, 0.7);
+}
+
+/* ---------- toasts ---------- */
+#toast-host {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+#toast-host[data-mode='frame'] {
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+#toast-host[data-mode='drive'] {
+  bottom: 18px;
+  right: 18px;
+  align-items: flex-end;
+}
+.toast {
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: rgba(228, 244, 242, 0.95);
+  background: rgba(8, 22, 26, 0.66);
+  border: 1px solid rgba(83, 224, 210, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s ease;
+}
+.toast.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------- debug panel ---------- */
+#debug-panel {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  bottom: 14px;
+  z-index: 60;
+  width: min(390px, 92vw);
+  overflow-y: auto;
+  border-radius: 14px;
+  padding: 14px 16px 18px;
+  color: #cfe6e3;
+  font-size: 11.5px;
+  background: rgba(6, 16, 19, 0.82);
+  border: 1px solid rgba(69, 200, 192, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+}
+#debug-panel header {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+#debug-panel header i {
+  font-style: normal;
+  opacity: 0.6;
+  font-weight: 400;
+}
+#debug-panel h4 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 14px 0 7px;
+  font-weight: 600;
+}
+#debug-panel h4 b {
+  color: #fff;
+  font-size: 13px;
+}
+#debug-panel h4 em {
+  font-style: normal;
+  opacity: 0.75;
+}
+.dbg-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.dbg-tile {
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dbg-tile span {
+  opacity: 0.55;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.dbg-tile b {
+  font-size: 12px;
+  font-weight: 600;
+}
+.dbg-tile.pos b {
+  color: #7fe0a8;
+}
+.dbg-tile.neg b {
+  color: #ef8f84;
+}
+.dbg-bar {
+  display: grid;
+  grid-template-columns: 108px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+.dbg-bar span {
+  opacity: 0.7;
+}
+.dbg-bar .track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.dbg-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #2f8f88, #53e0d2);
+}
+.dbg-bar i {
+  font-style: normal;
+  text-align: right;
+  opacity: 0.8;
+}
+.dbg-feed {
+  display: grid;
+  grid-template-columns: 12px 82px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.dbg-feed .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #666;
+}
+.dbg-feed .dot.ok {
+  background: var(--hl-signal);
+}
+.dbg-feed .dot.stale,
+.dbg-feed .dot.connecting {
+  background: #e8c35a;
+}
+.dbg-feed .dot.error,
+.dbg-feed .dot.offline {
+  background: #e05a4e;
+}
+.dbg-feed i {
+  font-style: normal;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dbg-feed b {
+  text-align: right;
+  opacity: 0.85;
+  font-weight: 500;
+}
+.dbg-actions div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.dbg-actions button {
+  font: inherit;
+  font-size: 11px;
+  color: #d6efec;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(83, 224, 210, 0.25);
+  background: rgba(83, 224, 210, 0.08);
+  cursor: pointer;
+}
+.dbg-actions button:hover {
+  background: rgba(83, 224, 210, 0.2);
+}
+
+/* ---------- legend ---------- */
+#legend-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(500px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 20px 24px 24px;
+  color: #d5eae7;
+  font-size: 13px;
+  line-height: 1.65;
+  background: rgba(6, 16, 19, 0.86);
+  border: 1px solid rgba(69, 200, 192, 0.16);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+#legend-panel header {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+}
+#legend-panel h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 14px 0 4px;
+}
+#legend-panel ul {
+  padding-left: 18px;
+}
+.legend-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.legend-tiers span {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.legend-tiers .t0 {
+  background: rgba(110, 242, 163, 0.12);
+}
+.legend-tiers .t1 {
+  background: rgba(190, 220, 140, 0.12);
+}
+.legend-tiers .t2 {
+  background: rgba(232, 195, 90, 0.14);
+}
+.legend-tiers .t3 {
+  background: rgba(224, 122, 78, 0.16);
+}
+.legend-tiers .t4 {
+  background: rgba(224, 60, 60, 0.2);
+}
+.legend-keys {
+  columns: 2;
+  list-style: none;
+  padding-left: 0 !important;
+}
+.legend-keys b {
+  color: #fff;
+}
+
+/* ---------- speedometer ---------- */
+#speedo {
+  position: fixed;
+  bottom: 62px;
+  left: 16px;
+  z-index: 40;
+  width: 102px;
+  height: 102px;
+  border-radius: 50%;
+  background: rgba(7, 20, 23, 0.55);
+  border: 1px solid rgba(69, 200, 192, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+  pointer-events: none;
+}
+#speedo svg {
+  position: absolute;
+  inset: 0;
+}
+.speedo-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.speedo-sweep {
+  fill: none;
+  stroke: #53e0d2;
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(83, 224, 210, 0.8));
+  transition: stroke 0.4s ease;
+}
+.speedo-sweep.hot {
+  stroke: #ffb454;
+  filter: drop-shadow(0 0 6px rgba(255, 180, 84, 0.9));
+}
+.speedo-ticks {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.32);
+  stroke-width: 1.4;
+}
+.speedo-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.speedo-value {
+  font-size: 24px;
+  font-weight: 250;
+  letter-spacing: 0.02em;
+  color: #eaf6f4;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.speedo-center i {
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(180, 214, 210, 0.6);
+  margin-top: 3px;
+}
+
+/* ---------- mobile controls ---------- */
+#mobile-ui.hidden {
+  display: none;
+}
+.mobile-bar {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 50;
+  display: flex;
+  gap: 8px;
+}
+.mobile-bar button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: #d6efec;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(83, 224, 210, 0.25);
+  background: rgba(8, 22, 26, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mobile-pad {
+  position: fixed;
+  bottom: 64px;
+  right: 16px;
+  z-index: 50;
+  width: 138px;
+  height: 138px;
+  border-radius: 50%;
+  border: 1px solid rgba(83, 224, 210, 0.3);
+  background: rgba(8, 22, 26, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  touch-action: none;
+  user-select: none;
+}
+.mobile-pad.active {
+  display: flex;
+}
+.mobile-pad span {
+  font-size: 9.5px;
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+  padding: 0 14px;
+}
+
+/* ---------- build/phase pill ---------- */
+#phase-pill {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 40;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: rgba(214, 236, 235, 0.82);
+  background: rgba(8, 22, 25, 0.55);
+  border: 1px solid rgba(69, 200, 192, 0.16);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ---------- minimap (docked at the bottom of the debug panel) ---------- */
+.dbg-map {
+  margin-top: 14px;
+}
+.dbg-map h4 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hl-teal);
+  margin: 0 0 7px;
+  font-weight: 600;
+}
+#minimap {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(69, 200, 192, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+</style>
+</head>
+<body>
+<!-- HashLake HUD mockup body â€” combined with src/styles.css by the build
+     snippet in docs/README. Every element is the REAL markup the app
+     renders, frozen with representative live data, over a lake-toned
+     backdrop. Iterate the styles here (Claude Design or by hand), then
+     port winning rules back into src/styles.css. -->
+<div style="position:fixed;inset:0;background:linear-gradient(180deg,#7793b5 0%,#8fa8bd 38%,#274d57 39%,#173b46 70%,#0e2b35 100%);"></div>
+
+<div id="phase-pill" style="position:fixed;top:14px;left:14px;">HASHLAKE Â· Fable p1 â€” Hero Water Â· 9835919 Â· WebGPU Â· Serene 12 Â· 60 fps Â· DRIVE 52 mph Â· Chase</div>
+
+<div id="btc-pill"><span>$63,184&nbsp; +1.62% Â· 1.4 sat/vB Â· #956,699</span><span class="pill-dot green"></span></div>
+
+<div id="toast-host" data-mode="drive"><div class="toast in">New block found â€” #956,699</div></div>
+
+<div id="speedo">
+  <svg viewBox="0 0 102 102" width="102" height="102">
+    <path d="M 12.9 73.0 A 44 44 0 1 1 89.1 73.0" class="speedo-track"/>
+    <path d="M 12.9 73.0 A 44 44 0 0 1 8.5 39.9" class="speedo-sweep hot"/>
+    <path d="M 13.2 33.0 L 8.0 30.1 M 51.0 7.0 L 51.0 1.0 M 74.9 12.6 L 77.9 7.4 M 89.1 73.0 L 94.3 76.0" class="speedo-ticks"/>
+  </svg>
+  <div class="speedo-center"><span class="speedo-value">52</span><i>mph</i></div>
+</div>
+
+<div id="debug-panel" style="right:14px;left:auto;">
+  <div>
+    <header>Hashlake â€” Debug <i>60 fps Â· WebGPU</i></header>
+    <div class="dbg-tiles">
+      <div class="dbg-tile"><span>Price</span><b>$63,184</b></div>
+      <div class="dbg-tile pos"><span>24h</span><b>+1.62%</b></div>
+      <div class="dbg-tile pos"><span>7d</span><b>+5.23%</b></div>
+      <div class="dbg-tile"><span>Fastest fee</span><b>1.4 sat/vB</b></div>
+      <div class="dbg-tile"><span>Mempool</span><b>97,065 tx</b></div>
+      <div class="dbg-tile"><span>Block</span><b>#956,699</b></div>
+      <div class="dbg-tile"><span>Difficulty Î”</span><b>-0.68%</b></div>
+      <div class="dbg-tile"><span>Staleness</span><b>0%</b></div>
+      <div class="dbg-tile"><span>Mode</span><b>drive</b></div>
+      <div class="dbg-tile"><span>Speed</span><b>52 mph</b></div>
+      <div class="dbg-tile"><span>Boat</span><b>40, 420</b></div>
+      <div class="dbg-tile"><span>Camera</span><b>Chase</b></div>
+    </div>
+    <section>
+      <h4>stormindex <b>12.4</b> <em>Serene</em></h4>
+      <div class="dbg-bar"><span>price trend Ã—0.35</span><div class="track"><div class="fill" style="width:35%"></div></div><i>35.3</i></div>
+      <div class="dbg-bar"><span>week trend Ã—0.25</span><div class="track"><div class="fill" style="width:24%"></div></div><i>23.9</i></div>
+      <div class="dbg-bar"><span>fees Ã—0.2</span><div class="track"><div class="fill" style="width:2%"></div></div><i>2.0</i></div>
+      <div class="dbg-bar"><span>congestion Ã—0.1</span><div class="track"><div class="fill" style="width:38%"></div></div><i>37.6</i></div>
+    </section>
+    <section>
+      <h4>feeds</h4>
+      <div class="dbg-feed"><span class="dot ok"></span><span>price</span><i>ok</i><b>1s ago</b></div>
+      <div class="dbg-feed"><span class="dot ok"></span><span>mempool</span><i>ok</i><b>0s ago</b></div>
+      <div class="dbg-feed"><span class="dot ok"></span><span>whales</span><i>52.2 BTC</i><b>4s ago</b></div>
+      <div class="dbg-feed"><span class="dot ok"></span><span>websocket</span><i>coinbase live</i><b>0s ago</b></div>
+    </section>
+    <section class="dbg-actions">
+      <h4>manual override â€” live</h4>
+      <div>
+        <button>Crash</button><button>Rally</button><button>Gust</button>
+        <button>Stale</button><button>Block</button><button>Resume live</button>
+      </div>
+    </section>
+  </div>
+  <div class="dbg-map">
+    <h4>lake map</h4>
+    <div style="width:356px;max-width:100%;height:313px;border-radius:12px;border:1px solid rgba(69,200,192,0.2);background:radial-gradient(ellipse 60% 55% at 48% 52%, #144046 0%, #0e3a42 55%, #101815 56%, #131c18 100%);"></div>
+  </div>
+</div>
+
+</body>
+</html>
