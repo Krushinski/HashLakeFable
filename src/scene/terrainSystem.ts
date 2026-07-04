@@ -125,6 +125,20 @@ export function terrainHeight(x: number, z: number): number {
     2.6 *
     Math.min(1, sdf / 90)
 
+  // rolling breaks — real land is never a smooth ramp; these folds are
+  // where shadows live (§user: ruggedness/mood pass)
+  h +=
+    fbm2(x * 0.008, z * 0.008, { octaves: 3, seed: 131 }) *
+    3.4 *
+    Math.min(1, sdf / 60)
+
+  // occasional rocky outcrop knolls that shoulder out of the meadow —
+  // their slopes flip the shader to granite automatically
+  const knoll = ridgedNoise(x * 0.004, z * 0.004, 555)
+  h +=
+    Math.max(0, knoll - 0.62) * 46 *
+    Math.min(1, Math.max(0, (sdf - 25) / 120))
+
   // Foothills climbing toward the north range.
   const north = Math.min(1, Math.max(0, (-z - 620) / 900))
   h += north * north * 130
@@ -158,6 +172,12 @@ const FAR_RIDGES: Ridge[] = [
   { x1: -900, z1: -3750, h1: 1120, x2: 1500, z2: -3500, h2: 880, r: 900 },
   { x1: 2300, z1: -2600, h1: 640, x2: 3600, z2: -1500, h2: 430, r: 760 },
   { x1: -3600, z1: -1300, h1: 540, x2: -2600, z2: -2300, h2: 730, r: 800 },
+  // supporting ranges ringing the world (§user) — the due south stays
+  // low and open so the basin still breathes
+  { x1: 2700, z1: -600, h1: 480, x2: 3500, z2: 800, h2: 620, r: 720 },
+  { x1: -3500, z1: 300, h1: 560, x2: -2700, z2: 1700, h2: 410, r: 700 },
+  { x1: 1900, z1: 2700, h1: 300, x2: 3300, z2: 1800, h2: 440, r: 640 },
+  { x1: -2400, z1: 2600, h1: 340, x2: -1300, z2: 3100, h2: 260, r: 600 },
 ]
 
 function farRangeHeight(x: number, z: number): number {
@@ -197,10 +217,20 @@ export class FarRanges {
       return positionLocal
     })()
     material.colorNode = Fn(() => {
-      const rock = mix(color(0x55524c), color(0x7d786f),
-        mx_noise_float(vec3(positionLocal.xz.mul(0.004), 3.3)).mul(0.5).add(0.5))
+      // granite strata: broad banding + finer fracture tone
+      const strata = mx_noise_float(
+        vec3(positionLocal.x.mul(0.0035), vH.mul(0.016), positionLocal.z.mul(0.0035)),
+      ).mul(0.5).add(0.5)
+      const fract = mx_noise_float(vec3(positionLocal.xz.mul(0.011), 8.1))
+        .mul(0.5).add(0.5)
+      const rock = mix(
+        mix(color(0x4e4b45), color(0x7d786f), strata),
+        color(0x8f897e),
+        fract.mul(0.3),
+      )
       const snow = color(0xe8edf0)
-      return mix(rock, snow, smoothstep(float(640), float(800), vH))
+      const snowJit = mx_noise_float(vec3(positionLocal.xz.mul(0.004), 5.5)).mul(90)
+      return mix(rock, snow, smoothstep(float(620), float(790), vH.add(snowJit)))
     })()
     const mesh = new THREE.Mesh(geo, material)
     scene.add(mesh)
@@ -284,11 +314,15 @@ export class TerrainSystem {
       )
 
       // meadow: lush near shore, drier + patchier with altitude
-      const grass = mix(
+      let grass = mix(
         mix(grassLush, grassDeep, patch.mul(0.5).add(0.5)),
         meadowDry,
         macro.mul(0.5).add(0.5).mul(0.55),
       )
+      // lakeside lush band — the rich waterline green from the serene
+      // reference frames
+      const lakeside = smoothstep(float(30), float(4), vShore)
+      grass = mix(grass, color(0x2e6b28), lakeside.mul(0.5))
       const upland = mix(
         grass,
         forestFloor,

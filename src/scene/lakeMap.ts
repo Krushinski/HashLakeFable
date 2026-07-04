@@ -38,14 +38,16 @@ const LAKE_BLOBS: Blob[] = [
 ]
 
 /** Landmark features that shape the lake bed. */
-export const ISLAND = { cx: -260, cz: 330, r: 90, crest: 2.4 }
+// island: cubic-falloff plateau (a peaked gaussian left it a 38 m
+// marshmallow) — landR is where the bed crosses the waterline
+export const ISLAND = { cx: -260, cz: 330, r: 155, crest: 3.6, landR: 74 }
 export const SANDBAR = {
   cx: 230,
   cz: 360,
   rx: 160,
   rz: 60,
   rot: -0.35,
-  crest: 0.35,
+  crest: 0.9,
 }
 
 function blobSdf(x: number, z: number, b: Blob): number {
@@ -65,6 +67,8 @@ function smoothMin(a: number, b: number, k: number): number {
 /**
  * Signed distance to the lake shoreline in meters.
  * Negative inside the water, positive on land.
+ * The island and the exposed sandbar crest are LAND here too — one
+ * source of truth for water trim, terrain color, foam, minimap, boat.
  */
 export function shoreSdf(x: number, z: number): number {
   let d = Infinity
@@ -75,7 +79,26 @@ export function shoreSdf(x: number, z: number): number {
   const wobble =
     fbm2(x * 0.0016, z * 0.0016, { octaves: 3, seed: 7 }) * 46 +
     fbm2(x * 0.008, z * 0.008, { octaves: 2, seed: 23 }) * 9
-  return d + wobble
+  let s = d + wobble
+
+  // island landmass (own gentle wobble — the lake-scale one would
+  // swallow a 74 m shoreline whole)
+  const di = Math.hypot(x - ISLAND.cx, z - ISLAND.cz)
+  const islandLand =
+    ISLAND.landR - di + fbm2(x * 0.01, z * 0.01, { octaves: 2, seed: 71 }) * 8
+  s = Math.max(s, islandLand)
+
+  // exposed sandbar crest — a slim ellipse of dry sand
+  const c = Math.cos(SANDBAR.rot)
+  const sn = Math.sin(SANDBAR.rot)
+  const dx = x - SANDBAR.cx
+  const dz = z - SANDBAR.cz
+  const lx = (dx * c - dz * sn) / SANDBAR.rx
+  const lz = (dx * sn + dz * c) / SANDBAR.rz
+  const barLand = (0.125 - Math.hypot(lx, lz)) * 70
+  s = Math.max(s, barLand)
+
+  return s
 }
 
 function gaussianBump(
@@ -110,9 +133,18 @@ export function bedHeight(x: number, z: number): number {
   // Gentle bed relief so the shallows aren't a perfect ramp.
   bed += fbm2(x * 0.003, z * 0.003, { octaves: 3, seed: 41 }) * 1.6 * t
 
-  // Island rises through the surface; sandbar grazes it.
-  const island = gaussianBump(x, z, ISLAND.cx, ISLAND.cz, ISLAND.r, ISLAND.r)
-  bed = Math.max(bed, -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * island)
+  // Island: cubic-falloff plateau — flat-topped, steep sides, wide
+  // beach shelf; relief noise breaks the marshmallow dome
+  const du = Math.hypot(x - ISLAND.cx, z - ISLAND.cz) / ISLAND.r
+  const islandG = Math.exp(-Math.pow(du, 3) * 1.2)
+  bed = Math.max(
+    bed,
+    -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * islandG,
+  )
+  if (islandG > 0.5) {
+    bed += (islandG - 0.5) * 2 *
+      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 2.2
+  }
 
   const bar = gaussianBump(
     x,

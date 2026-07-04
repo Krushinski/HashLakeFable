@@ -91,8 +91,8 @@ export class Minimap {
         }
       }
     }
-    mark(ISLAND.cx, ISLAND.cz, ISLAND.r * 0.8, [72, 96, 58])
-    mark(SANDBAR.cx, SANDBAR.cz, SANDBAR.rz * 0.9, [196, 182, 140])
+    mark(ISLAND.cx, ISLAND.cz, ISLAND.landR, [72, 96, 58])
+    mark(SANDBAR.cx, SANDBAR.cz, SANDBAR.rz * 0.4, [196, 182, 140])
 
     // labels baked on top of the geography
     this.ctx.putImageData(img, 0, 0)

@@ -15,6 +15,7 @@ import { RainSystem } from './scene/rainSystem'
 import { LightningSystem } from './scene/lightningSystem'
 import { FireSkySystem } from './scene/fireSkySystem'
 import { WakeSystem } from './scene/wakeSystem'
+import { LakeDressing } from './scene/dressing'
 import { Speedometer } from './ui/speedometer'
 import { LofiRadio } from './core/lofiRadio'
 import { Minimap } from './ui/minimap'
@@ -104,6 +105,8 @@ async function boot(): Promise<void> {
   const lightning = new LightningSystem(scene)
   const fireSky = new FireSkySystem(scene)
   const wake = new WakeSystem(scene, waveField, boat)
+  const dressing = new LakeDressing(scene, waveField)
+  dressing.load().catch((err) => console.error('dressing load failed:', err))
   const speedo = new Speedometer()
   const lofi = new LofiRadio()
   new FarRanges(scene)
@@ -480,6 +483,7 @@ async function boot(): Promise<void> {
 
     // drive feel
     wake.update(dt)
+    dressing.update()
     speedo.update(boat.speedMph)
 
     if (driveMode) {
