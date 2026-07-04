@@ -104,6 +104,9 @@ export class BoatSystem {
       if (mesh.name.includes('Flag') || o.parent?.name.includes('Flag')) {
         this.riggedFlag(mesh)
       }
+      if (mesh.name.includes('Scarf')) {
+        this.riggedScarf(mesh)
+      }
     })
 
     // face -z when heading = π (glTF -z forward after y-up export; our hull
@@ -128,6 +131,24 @@ export class BoatSystem {
       const amp = along.mul(0.16).mul(wind)
       p.z.addAssign(sin(phase).mul(amp))
       p.y.addAssign(sin(phase.mul(0.7)).mul(amp).mul(0.3))
+      return p
+    })()
+    mat.side = THREE.DoubleSide
+  }
+
+  /** Satoshi's scarf tail — streams aft, driven by the same wind uniform. */
+  private riggedScarf(mesh: THREE.Mesh): void {
+    const mat = mesh.material as THREE.MeshStandardNodeMaterial
+    const t = this.waveField.uTime
+    const wind = this.uFlagWind
+    mat.positionNode = Fn(() => {
+      const p = positionLocal.toVar()
+      // tail anchored at the neck (authored from x≈1.0, trailing +x)
+      const along = positionLocal.x.sub(1.0).max(0)
+      const phase = along.mul(7).sub(t.mul(6))
+      const amp = along.mul(0.13).mul(wind)
+      p.z.addAssign(sin(phase).mul(amp))
+      p.y.addAssign(sin(phase.mul(0.8).add(1.2)).mul(amp).mul(0.45))
       return p
     })()
     mat.side = THREE.DoubleSide
