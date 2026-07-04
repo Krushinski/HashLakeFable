@@ -10,6 +10,10 @@ originals. Third-party assets used under license:
   figure + scarf added, prop/rudder/exhaust details added.)
 - **Robe fabric ("caban" wool)** — Poly Haven, CC0.
   https://polyhaven.com/a/caban
+- **Island palms** — "Realistic Palm Tree Low Poly" by hamzaunity3d,
+  Sketchfab, CC Attribution 4.0.
+  https://sketchfab.com/3d-models/dc894acc16544bc69630e9a5232cf74c
+- **Boulders** — "Boulder 01" and "Namaqualand Boulder 02", Poly Haven, CC0.
 - **Spruce bark ("pine_bark")** — Poly Haven, CC0.
 - **Lofi radio** — the Lofi Girl (ChilledCow) 24/7 stream, embedded via
   YouTube; plays only on user request (M).
