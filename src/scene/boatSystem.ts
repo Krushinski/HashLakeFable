@@ -19,6 +19,7 @@ const MPH = 0.44704
 const SPEED_CRUISE = 52 * MPH
 const SPEED_BOOST = 100 * MPH
 const SPEED_SUPER = 120 * MPH
+const SPEED_ULTRA = 150 * MPH
 const SPEED_REVERSE = -8 * MPH
 
 export interface DriveInput {
@@ -28,6 +29,7 @@ export interface DriveInput {
   right: boolean
   boost: boolean
   superBoost: boolean
+  ultraBoost: boolean
   anchor: boolean
 }
 
@@ -43,8 +45,11 @@ export const DRIVE_PRESETS: DriveCameraPreset[] = [
   { name: 'Chase', back: 12.5, up: 4.4, lookAhead: 10, lookUp: 1.2 },
   { name: 'Low Chase', back: 9, up: 2.1, lookAhead: 14, lookUp: 1.6 },
   { name: 'High Map', back: 24, up: 30, lookAhead: 4, lookUp: 0 },
-  { name: 'OJ Mode', back: 19, up: 6.5, lookAhead: 8, lookUp: 1 },
-  { name: 'Vice City', back: 7.5, up: 3.2, lookAhead: 18, lookUp: 2.2 },
+  // OJ: like Chase but forward-looking and pulled out — see what's coming
+  { name: 'OJ Mode', back: 17, up: 7.2, lookAhead: 46, lookUp: 3 },
+  // Vice: near-helicopter — boat rides the bottom edge, the world fills
+  // the frame: sky, mountains, land, water all at once
+  { name: 'Vice City', back: 9, up: 26, lookAhead: 135, lookUp: 7 },
 ]
 
 export class BoatSystem {
@@ -159,12 +164,15 @@ export class BoatSystem {
       let target = 0
       let accel = 0
       if (input.forward) {
-        target = input.superBoost
-          ? SPEED_SUPER
-          : input.boost
-            ? SPEED_BOOST
-            : SPEED_CRUISE
-        accel = boosting ? 9.5 : 5.5
+        target =
+          input.ultraBoost && input.boost
+            ? SPEED_ULTRA
+            : input.superBoost
+              ? SPEED_SUPER
+              : input.boost
+                ? SPEED_BOOST
+                : SPEED_CRUISE
+        accel = boosting ? (input.ultraBoost ? 11.5 : 9.5) : 5.5
         if (this.speed < target) {
           this.speed = Math.min(target, this.speed + accel * dt)
         } else {
@@ -195,9 +203,10 @@ export class BoatSystem {
         // responsive at low speed, wide smooth arcs at high speed
         const rate = 1.05 / (1 + spd * 0.055)
         const dir = this.speed >= 0 ? 1 : -1
-        this.heading += steer * rate * dt * dir
+        // left arrow turns the BOW left (heading decreases in our compass)
+        this.heading -= steer * rate * dt * dir
         // bank into the turn
-        this.roll += (steer * Math.min(spd * 0.010, 0.16) - this.roll) *
+        this.roll += (-steer * Math.min(spd * 0.010, 0.16) - this.roll) *
           Math.min(1, dt * 3)
       }
     } else {

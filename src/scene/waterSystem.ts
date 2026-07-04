@@ -211,8 +211,9 @@ export class WaterSystem {
     const H = normalize(sky.uSunDirection.add(V))
     const NdotH = n.dot(H).max(0)
     const sunCol = sky.uSunColor
-    // Clamped to tame HDR fireflies that otherwise alias into bloom dots.
-    const glint = pow(NdotH, 360).mul(2.6).min(2.1).add(pow(NdotH, 48).mul(0.16))
+    // Clamped to tame HDR fireflies; softened so the sun path glows
+    // rather than blinds at grazing drive angles.
+    const glint = pow(NdotH, 360).mul(2.0).min(1.5).add(pow(NdotH, 48).mul(0.12))
 
     // ------------------------------------------------------------- foam
     const foamUv = worldXZ.mul(0.06).add(vec2(t.mul(0.02), t.mul(0.014)))

@@ -107,11 +107,19 @@ async function boot(): Promise<void> {
     0.3,
     12000,
   )
+  // Boat spawns at (40, 420); camera sits ~50m behind so the runabout
+  // rides the bottom third of the frame with the range beyond.
   const camRig = {
-    pos: new THREE.Vector3(40, 6, 620),
-    look: new THREE.Vector3(-30, 30, -900),
+    pos: new THREE.Vector3(40, 6.5, 470),
+    look: new THREE.Vector3(28, 21, -700),
     drift: 1,
   }
+  // Frame-mode look-around (click-drag) offsets
+  let lookYaw = 0
+  let lookPitch = 0
+  const curLook = new THREE.Vector3().copy(camRig.look)
+  const tmpBase = new THREE.Vector3()
+  const tmpTarget = new THREE.Vector3()
   // restore saved tableau
   try {
     const saved = JSON.parse(localStorage.getItem(TABLEAU_KEY) ?? 'null')
@@ -180,6 +188,7 @@ async function boot(): Promise<void> {
     right: false,
     boost: false,
     superBoost: false,
+    ultraBoost: false,
     anchor: false,
   }
   const keyMap: Record<string, keyof DriveInput> = {
@@ -195,6 +204,7 @@ async function boot(): Promise<void> {
     }
     if (e.key === 'Shift') input.boost = true
     if (e.key === 'Control') input.superBoost = e.shiftKey
+    if (e.key === 'z' || e.key === 'Z') input.ultraBoost = true
     if (e.code === 'Space') {
       input.anchor = true
       if (driveMode) e.preventDefault()
@@ -230,8 +240,10 @@ async function boot(): Promise<void> {
       toast.show('Tableau saved')
     }
     if (e.key === 'r' || e.key === 'R') {
-      camRig.pos.set(40, 6, 620)
-      camRig.look.set(-30, 30, -900)
+      camRig.pos.set(40, 6.5, 470)
+      camRig.look.set(28, 21, -700)
+      lookYaw = 0
+      lookPitch = 0
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
@@ -246,7 +258,32 @@ async function boot(): Promise<void> {
       input.superBoost = false
     }
     if (e.key === 'Control') input.superBoost = false
+    if (e.key === 'z' || e.key === 'Z') input.ultraBoost = false
     if (e.code === 'Space') input.anchor = false
+  })
+
+  // ---------- frame-mode look-around (click-drag, §6.1) ----------
+  let dragging = false
+  const dragStart = { x: 0, y: 0, yaw: 0, pitch: 0 }
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (driveMode) return
+    dragging = true
+    dragStart.x = e.clientX
+    dragStart.y = e.clientY
+    dragStart.yaw = lookYaw
+    dragStart.pitch = lookPitch
+  })
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging || driveMode) return
+    lookYaw = dragStart.yaw - (e.clientX - dragStart.x) * 0.0022
+    lookPitch = THREE.MathUtils.clamp(
+      dragStart.pitch + (e.clientY - dragStart.y) * 0.0016,
+      -0.42,
+      0.55,
+    )
+  })
+  window.addEventListener('pointerup', () => {
+    dragging = false
   })
 
   new MobileControls(input, {
@@ -362,17 +399,33 @@ async function boot(): Promise<void> {
 
     if (driveMode) {
       boat.driveCamera(camera, dt)
+      // keep frame-mode look target primed so exit glides, not snaps
+      curLook.set(boat.x, 8, boat.z)
     } else {
-      camera.position.set(
+      // damped tableau camera — gives the smooth zoom-out when leaving
+      // drive mode, and carries the user's drag look-around
+      const blend = 1 - Math.exp(-dt * 2.2)
+      tmpTarget.set(
         camRig.pos.x + Math.sin(t * 0.04) * 10 * camRig.drift,
         camRig.pos.y + Math.sin(t * 0.1) * 0.4 * camRig.drift,
         camRig.pos.z,
       )
-      camera.lookAt(
-        camRig.look.x + Math.sin(t * 0.03) * 18 * camRig.drift,
-        camRig.look.y,
-        camRig.look.z,
+      camera.position.lerp(tmpTarget, blend)
+
+      tmpBase.subVectors(camRig.look, camRig.pos)
+      const dist = tmpBase.length()
+      const baseYaw = Math.atan2(tmpBase.x, -tmpBase.z)
+      const basePitch = Math.asin(THREE.MathUtils.clamp(tmpBase.y / dist, -1, 1))
+      const yaw = baseYaw + lookYaw
+      const pitch = THREE.MathUtils.clamp(basePitch + lookPitch, -0.45, 0.6)
+      tmpTarget.set(
+        camRig.pos.x + Math.sin(yaw) * Math.cos(pitch) * dist +
+          Math.sin(t * 0.03) * 14 * camRig.drift,
+        camRig.pos.y + Math.sin(pitch) * dist,
+        camRig.pos.z - Math.cos(yaw) * Math.cos(pitch) * dist,
       )
+      curLook.lerp(tmpTarget, blend)
+      camera.lookAt(curLook)
     }
 
     post.render()
