@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu'
-import { attribute, positionWorld, texture, vec2, vec3 } from 'three/tsl'
+import { attribute, positionWorld, smoothstep, texture, uv, vec2, vec3, float } from 'three/tsl'
 import type { WaveField } from './waveField'
 import type { BoatSystem } from './boatSystem'
 import { makeFoamTexture } from './proceduralTextures'
@@ -38,6 +38,24 @@ interface WakePoint {
   speed: number // boat speed when this parcel was disturbed
 }
 
+/** Soft round droplet sprite — square points read as 2D confetti. */
+let sprayTexture: THREE.CanvasTexture | null = null
+function makeSprayTexture(): THREE.CanvasTexture {
+  if (sprayTexture) return sprayTexture
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)')
+  grad.addColorStop(0.35, 'rgba(242,250,248,0.5)')
+  grad.addColorStop(0.75, 'rgba(238,248,245,0.12)')
+  grad.addColorStop(1, 'rgba(238,248,245,0)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 64, 64)
+  sprayTexture = new THREE.CanvasTexture(c)
+  return sprayTexture
+}
+
 /** Pooled gravity particles rendered as Points; dead ones park far below. */
 class SprayPool {
   readonly points: THREE.Points
@@ -57,6 +75,7 @@ class SprayPool {
     const mat = new THREE.PointsMaterial({
       color: 0xf0faf7,
       size,
+      map: makeSprayTexture(),
       transparent: true,
       opacity,
       depthWrite: false,
@@ -138,6 +157,14 @@ export class WakeSystem {
       'color',
       new THREE.BufferAttribute(new Float32Array(maxVerts * 4), 4),
     )
+    // across-ribbon coordinate (u: 0 = one edge, 1 = the other) — the
+    // shader erodes the straight geometric edges into ragged foam
+    const uvArr = new Float32Array(maxVerts * 2)
+    for (let i = 0; i < maxVerts; i++) {
+      uvArr[i * 2] = i % 2
+      uvArr[i * 2 + 1] = 0
+    }
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2))
     this.geometry.setIndex(
       new THREE.BufferAttribute(new Uint16Array((MAX_POINTS - 1) * 18), 1),
     )
@@ -160,10 +187,25 @@ export class WakeSystem {
       foam,
       vec2(positionWorld.z, positionWorld.x).mul(0.043),
     )
+    // ragged edges: push the across coordinate around with the foam
+    // field, then fade both borders — no more ruler-straight silhouette
+    const across = uv().x
+    const ragged = across.add(f.r.sub(0.5).mul(0.6))
+    const edge = smoothstep(float(0.0), float(0.3), ragged).mul(
+      smoothstep(float(1.0), float(0.7), ragged),
+    )
+    // churn core: brightest, most opaque along the centerline
+    const core = float(1).sub(across.sub(0.5).abs().mul(2))
     material.colorNode = vec3(vcol.x, vcol.y, vcol.z)
-      .mul(f.r.mul(0.5).add(0.85))
+      .mul(f.r.mul(0.5).add(core.mul(0.22)).add(0.78))
     material.opacityNode = vcol.w
-      .mul(f.r.mul(0.9).add(f.g.mul(f2.g).mul(0.55)).add(0.14))
+      .mul(edge)
+      .mul(
+        f.r.mul(0.85)
+          .add(f.g.mul(f2.g).mul(0.5))
+          .add(core.mul(0.3))
+          .add(0.08),
+      )
       .clamp(0, 1)
 
     this.mesh = new THREE.Mesh(this.geometry, material)
@@ -171,8 +213,8 @@ export class WakeSystem {
     this.mesh.renderOrder = 15
     scene.add(this.mesh)
 
-    this.bowSpray = new SprayPool(scene, 420, 0.34, 0.62)
-    this.rooster = new SprayPool(scene, 260, 0.85, 0.5)
+    this.bowSpray = new SprayPool(scene, 420, 0.6, 0.55)
+    this.rooster = new SprayPool(scene, 260, 1.25, 0.42)
   }
 
   update(dt: number): void {
@@ -275,8 +317,8 @@ export class WakeSystem {
 
       // ---- Kelvin arms: crisp lines propagating at 19.5° wave speed ----
       const armDist = 1.2 + p.age * p.speed * KELVIN_SIN
-      const armW = 0.35 + p.age * 0.22 + spdN * 0.25
-      const armA = Math.pow(fade, 1.9) * (0.06 + spdN * 0.5)
+      const armW = 0.32 + p.age * 0.15 + spdN * 0.2
+      const armA = Math.pow(fade, 2.1) * (0.05 + spdN * 0.42)
       const armY = this.waveField.heightAt(p.x - px * armDist, p.z - pz * armDist, t) + 0.09
       pos.setXYZ(A * 2 + i * 2, p.x - px * (armDist + armW), armY, p.z - pz * (armDist + armW))
       pos.setXYZ(A * 2 + i * 2 + 1, p.x - px * (armDist - armW), armY, p.z - pz * (armDist - armW))

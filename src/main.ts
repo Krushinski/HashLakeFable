@@ -150,6 +150,19 @@ async function boot(): Promise<void> {
   camera.position.copy(camRig.pos)
   camera.lookAt(camRig.look)
 
+  // Exiting drive keeps the tableau WITH the boat — a 3/4 pull-back shot
+  // from wherever the run ended, never a glide home to the spawn point.
+  const exitDriveTableau = () => {
+    const dx = Math.sin(boat.heading)
+    const dz = -Math.cos(boat.heading)
+    camRig.pos.set(
+      boat.x - dx * 52 - dz * 20,
+      11,
+      boat.z - dz * 52 + dx * 20,
+    )
+    camRig.look.set(boat.x + dx * 30, 4, boat.z + dz * 30)
+  }
+
   // ---------- post ----------
   const PipelineCtor =
     (THREE as unknown as { RenderPipeline?: typeof THREE.PostProcessing })
@@ -227,6 +240,7 @@ async function boot(): Promise<void> {
     }
     if (e.key === 'x' || e.key === 'X') {
       driveMode = !driveMode
+      if (!driveMode) exitDriveTableau()
       toast.setMode(driveMode ? 'drive' : 'frame')
       speedo.setVisible(driveMode)
       updatePill()
@@ -269,6 +283,7 @@ async function boot(): Promise<void> {
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
+      exitDriveTableau()
       toast.setMode('frame')
       speedo.setVisible(false)
       updatePill()
@@ -347,6 +362,7 @@ async function boot(): Promise<void> {
   new MobileControls(input, {
     toggleDrive: () => {
       driveMode = !driveMode
+      if (!driveMode) exitDriveTableau()
       toast.setMode(driveMode ? 'drive' : 'frame')
       updatePill()
     },
@@ -495,10 +511,11 @@ async function boot(): Promise<void> {
       camera.lookAt(curLook)
     }
 
-    // "heavenly blinding" fix, round 2: much stronger sun-facing ease
+    // "heavenly blinding" fix, round 3: heading dead south into the sun
+    // still washed out at 0.48 — ease harder
     camera.getWorldDirection(tmpDir)
     const facing = Math.max(0, tmpDir.dot(sky.sunDirection))
-    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.48)
+    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.62)
 
     post.render()
 

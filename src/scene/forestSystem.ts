@@ -209,7 +209,7 @@ export class ForestSystem {
       const s = shoreSdf(x, z)
       if (s < 50 || s > 1200) continue
       const h = terrainHeight(x, z)
-      if (h > 345) continue // stop below the rock line
+      if (h > 190) continue // hug the lake bowl — high trees read as ants
       let ok = true
       for (const p of impSlots) {
         if ((p.x - x) ** 2 + (p.z - z) ** 2 < 88) { ok = false; break }
