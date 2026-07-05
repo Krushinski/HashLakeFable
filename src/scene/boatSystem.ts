@@ -90,6 +90,10 @@ export class BoatSystem {
   heading = 0 // 0 = facing north (-z), toward the hero range
   speed = 0
 
+  /** When Water Pro drives buoyancy, its proxy height lands here and
+   *  overrides the legacy Gerstner heave (pitch/roll stay approximate). */
+  externalHeave: number | null = null
+
   private pitch = 0
   private roll = 0
   private heave = 0
@@ -341,7 +345,8 @@ export class BoatSystem {
     this.bowLift += (liftTarget - this.bowLift) * Math.min(1, dt * 1.8)
 
     const k = Math.min(1, dt * 6)
-    this.heave += (targetHeave - this.heave) * k
+    const heaveTarget = this.externalHeave ?? targetHeave
+    this.heave += (heaveTarget - this.heave) * k
     this.pitch += (targetPitch - this.pitch) * k
     const waveRollBlend = this.roll * 0.7 + targetRollWave * 0.65
     this.roll += (waveRollBlend - this.roll) * Math.min(1, dt * 4)

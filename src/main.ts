@@ -16,6 +16,10 @@ import { LightningSystem } from './scene/lightningSystem'
 import { FireSkySystem } from './scene/fireSkySystem'
 import { WakeSystem } from './scene/wakeSystem'
 import { LakeDressing } from './scene/dressing'
+import { ProWater } from './scene/proWater'
+
+/** Licensed Water Pro + Sky Pro pipeline (gitignored libs, local builds). */
+const USE_PRO = true
 import { Speedometer } from './ui/speedometer'
 import { LofiRadio } from './core/lofiRadio'
 import { Minimap } from './ui/minimap'
@@ -91,27 +95,28 @@ async function boot(): Promise<void> {
   const scene = new THREE.Scene()
   scene.fog = new THREE.Fog(0xcfdad2, 1700, 5600)
 
-  const sky = new SkySystem(renderer, scene)
+  // legacy CPU wave field stays: boat steering approximations, splash
+  // seating, buoys — the VISUAL water is Water Pro's FFT when USE_PRO
   const waveField = new WaveField(20)
-  const water = new WaterSystem(scene, waveField, sky)
+  const sky = USE_PRO ? null : new SkySystem(renderer, scene)
+  const water = USE_PRO ? null : new WaterSystem(scene, waveField, sky!)
   new TerrainSystem(scene)
   const forest = new ForestSystem(scene)
   forest.load().catch((err) => console.error('forest load failed:', err))
-  const clouds = new CloudSystem(scene)
+  const clouds = USE_PRO ? null : new CloudSystem(scene)
   const boat = new BoatSystem(scene, waveField)
-  boat.load().catch((err) => console.error('boat load failed:', err))
   const effects = new EffectsSystem(scene, waveField, boat)
   const rain = new RainSystem(scene, renderer)
   const lightning = new LightningSystem(scene)
   const fireSky = new FireSkySystem(scene)
-  const wake = new WakeSystem(scene, waveField, boat)
+  const wake = USE_PRO ? null : new WakeSystem(scene, waveField, boat)
   const dressing = new LakeDressing(scene, waveField)
   dressing.load().catch((err) => console.error('dressing load failed:', err))
   const speedo = new Speedometer()
   const lofi = new LofiRadio()
   new FarRanges(scene)
 
-  sky.bakeEnvironment()
+  sky?.bakeEnvironment()
 
   // ---------- data + weather ----------
   const store = new LiveBitcoinStore()
@@ -125,6 +130,14 @@ async function boot(): Promise<void> {
     0.3,
     12000,
   )
+  // Water Pro + Sky Pro — created after the camera exists; the boat
+  // registers with buoyancy/wake once its GLB is in
+  const pro = USE_PRO ? await ProWater.create(renderer, scene, camera) : null
+  boat
+    .load()
+    .then(() => pro?.attachBoat(boat))
+    .catch((err) => console.error('boat load failed:', err))
+
   // Boat spawns at (40, 420); camera sits ~50m behind so the runabout
   // rides the bottom third of the frame with the range beyond.
   const camRig = {
@@ -173,7 +186,18 @@ async function boot(): Promise<void> {
   const post = new PipelineCtor(renderer)
   const scenePass = pass(scene, camera)
   const scenePassColor = scenePass.getTextureNode('output')
-  post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.09, 0.3, 1.45))
+  if (pro) {
+    // Water Pro's post stack (atmospheric fog, underwater, sun shafts)
+    // wraps the scene, then our bloom rides on top
+    const waterOut = pro.water.postProcessing.buildNode(
+      scenePass,
+      scenePassColor,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) as any
+    post.outputNode = waterOut.add(bloom(waterOut, 0.09, 0.3, 1.45))
+  } else {
+    post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.09, 0.3, 1.45))
+  }
 
   // ---------- UI ----------
   const pill = new BitcoinPill(store)
@@ -395,12 +419,20 @@ async function boot(): Promise<void> {
       lerpAnchors(TIER_VISUALS.chop, t) * (weather.isGusting ? 1.35 : 1)
     waveField.params.choppiness = lerpAnchors(TIER_VISUALS.choppiness, t)
 
-    sky.sky.turbidity.value = lerpAnchors(TIER_VISUALS.turbidity, t)
-    sky.sky.rayleigh.value = lerpAnchors(TIER_VISUALS.rayleigh, t)
-    baseExposure =
-      lerpAnchors(TIER_VISUALS.exposure, t) * (1 - d.skyDark * 0.35)
-    sky.sunLight.intensity =
-      lerpAnchors(TIER_VISUALS.sunIntensity, t) * (1 - d.skyDark * 0.6)
+    if (pro) {
+      pro.applyWeatherRaw(t, d.skyDark)
+      // Sky Pro's physical atmosphere sits ~2.5x dimmer through ACES than
+      // the legacy Preetham dome at the same exposure
+      baseExposure =
+        lerpAnchors(TIER_VISUALS.exposure, t) * 2.5 * (1 - d.skyDark * 0.35)
+    } else if (sky) {
+      sky.sky.turbidity.value = lerpAnchors(TIER_VISUALS.turbidity, t)
+      sky.sky.rayleigh.value = lerpAnchors(TIER_VISUALS.rayleigh, t)
+      baseExposure =
+        lerpAnchors(TIER_VISUALS.exposure, t) * (1 - d.skyDark * 0.35)
+      sky.sunLight.intensity =
+        lerpAnchors(TIER_VISUALS.sunIntensity, t) * (1 - d.skyDark * 0.6)
+    }
 
     // fog: tier haze + stale fog crush + fire tint
     const fog = scene.fog as THREE.Fog
@@ -418,11 +450,11 @@ async function boot(): Promise<void> {
     fog.near = lerpAnchors(TIER_VISUALS.fogNear, t) * staleCrush
     fog.far = lerpAnchors(TIER_VISUALS.fogFar, t) * Math.max(0.22, staleCrush)
 
-    clouds.setMood(d.skyDark, 1 + d.rain * 0.3)
+    clouds?.setMood(d.skyDark, 1 + d.rain * 0.3)
 
     // env rebake at most every 4s, only when the tier band moved
     const band = Math.round(t * 4)
-    if (band !== lastBakedTier && now - lastBakeT > 4) {
+    if (sky && band !== lastBakedTier && now - lastBakeT > 4) {
       lastBakedTier = band
       lastBakeT = now
       sky.bakeEnvironment()
@@ -471,16 +503,25 @@ async function boot(): Promise<void> {
     phasePill.textContent = `${phasePillText(rendererPath)} · ${weather.tierName} ${weather.stormIndex.toFixed(0)} · ${fps.toFixed(0)} fps${drive}`
   }
 
-  renderer.setAnimationLoop(() => {
+  renderer.setAnimationLoop(async () => {
     const rawDt = clock.getDelta()
     const dt = Math.min(rawDt, 0.1)
     const t = clock.elapsedTime
 
     applyWeather(dt, t)
-    water.update(dt)
-    clouds.update(dt)
+    water?.update(dt)
+    clouds?.update(dt)
     boat.update(dt, driveMode ? input : null)
     effects.update(dt)
+
+    if (pro) {
+      // proxy carries the hull footprint; Water Pro resolves its heave
+      pro.boatProxy.position.x = boat.x
+      pro.boatProxy.position.z = boat.z
+      pro.setBoatSpeed(Math.abs(boat.speed))
+      await pro.update(dt)
+      boat.externalHeave = pro.boatProxy.position.y
+    }
 
     // storm theater
     if (driveMode) tmpFocus.set(boat.x, 0, boat.z)
@@ -490,7 +531,7 @@ async function boot(): Promise<void> {
     fireSky.update(dt, weather.dials.fireWeather, tmpFocus)
 
     // drive feel
-    wake.update(dt)
+    wake?.update(dt)
     dressing.update()
     speedo.update(boat.speedMph)
 
@@ -524,10 +565,15 @@ async function boot(): Promise<void> {
     }
 
     // "heavenly blinding" fix, round 3: heading dead south into the sun
-    // still washed out at 0.48 — ease harder
-    camera.getWorldDirection(tmpDir)
-    const facing = Math.max(0, tmpDir.dot(sky.sunDirection))
-    renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.62)
+    // still washed out at 0.48 — ease harder (legacy sky only; Sky Pro's
+    // physical atmosphere doesn't blow out the same way)
+    if (sky) {
+      camera.getWorldDirection(tmpDir)
+      const facing = Math.max(0, tmpDir.dot(sky.sunDirection))
+      renderer.toneMappingExposure = baseExposure * (1 - facing * facing * 0.62)
+    } else {
+      renderer.toneMappingExposure = baseExposure
+    }
 
     post.render()
 

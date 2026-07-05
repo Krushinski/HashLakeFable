@@ -9,3 +9,7 @@ artifacts/
 *.blend1
 .DS_Store
 Thumbs.db
+
+# Commercial libraries - NEVER commit (licensed, source-private)
+src/threejs-water-pro/
+src/threejs-sky-pro/
