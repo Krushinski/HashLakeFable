@@ -527,9 +527,10 @@ async function boot(): Promise<void> {
       // smooth the proxy's heave before the hull takes it — Water Pro's
       // own smoothing assumes 60Hz steps and passes jitter through at
       // 20fps (the resting-boat glitch)
-      boat.externalHeave +=
-        (pro.boatProxy.position.y - boat.externalHeave) *
-        (1 - Math.exp(-dt * 8))
+      const prevHeave = boat.externalHeave ?? pro.boatProxy.position.y
+      boat.externalHeave =
+        prevHeave +
+        (pro.boatProxy.position.y - prevHeave) * (1 - Math.exp(-dt * 8))
     }
 
     // storm theater
