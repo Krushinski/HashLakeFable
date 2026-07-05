@@ -188,18 +188,20 @@ export class ProWater {
     p.water.clipPlaneDistance = 0.05
     p.water.waterline.enabled = false
 
-    // Diagnostic switches — every luxury defaults ON (they're paid-for
-    // bells); the params exist so each system's frame cost and artifact
-    // contribution can be isolated LIVE without redeploys:
-    //   ?wake      re-enable the wake field (CONVICTED: r185 explosion)
-    //   ?nossr     screen-space reflections off (scratch-line suspect)
-    //   ?nosparkle sun sparkle off
-    //   ?nofoam    ambient surface-foam blotches off
+    // Two GPU field/particle sims are CONVICTED of r185 corruption and
+    // parked (not deleted — flags re-enable them for A/B the moment we
+    // have a fix or a vendor patch):
+    //   ?wake   wake displacement field (exploding: mountain-trail churn)
+    //   ?spray  crest spray compute particles — dusk ships it ENABLED and
+    //           unconfigured it ran corrupted since day one: the
+    //           rectangular garbage field at spawn, the stretched spike
+    //           streaks (bottom-left "scratch lines"), the mist blob
+    //           around the hull.
+    // (The earlier ?nossr/?nofoam flags are gone — toggling those after
+    // pipeline build black-screens; lesson learned.)
     const flags = new URLSearchParams(location.search)
     p.water.wake.enabled = flags.has('wake')
-    if (flags.has('nossr')) p.water.ssr.enabled = false
-    if (flags.has('nosparkle')) p.water.sparkle.enabled = false
-    if (flags.has('nofoam')) p.water.foam.surface.enabled = false
+    if (p.water.spray) p.water.spray.enabled = flags.has('spray')
 
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
