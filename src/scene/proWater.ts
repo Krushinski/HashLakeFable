@@ -20,11 +20,31 @@ import type { BoatSystem } from './boatSystem'
  * plane reads as our lake with zero masking.
  */
 
-/** Storm-tier anchors for the FFT spectrum (lake-scaled, not open ocean). */
+/**
+ * Storm-tier anchors, lake-scaled. Hard constraint: shore elevations are
+ * only 1-4 m above waterline, so TOTAL surface displacement (FFT + Gerstner
+ * swell) must stay well under ~1 m even at full storm or the water visually
+ * crests over the beaches. Wind speeds are fetch-limited (~2 km basin):
+ * JONSWAP peak wavelength at 12 m/s is already ~90 m — beyond that the
+ * spectrum wants open-ocean rollers.
+ */
 const WATER_TIERS = {
-  windSpeed: [4.5, 7, 11, 16, 22],
-  amplitude: [0.32, 0.5, 0.75, 1.0, 1.2],
-  choppiness: [1.0, 1.15, 1.35, 1.55, 1.7],
+  windSpeed: [3, 4.5, 7, 9.5, 12],
+  amplitude: [0.15, 0.22, 0.32, 0.45, 0.6],
+  choppiness: [1.0, 1.15, 1.3, 1.45, 1.6],
+  // Gerstner is Water Pro's analytic large-swell layer, SEPARATE from the
+  // FFT. Presets ship it at ocean scale (dusk: 1.76 m × 451 m) — that was
+  // the "water floods the land" bug. Lake swell: a long low breathing of
+  // the surface, never a wall.
+  swellAmp: [0.03, 0.05, 0.09, 0.15, 0.22],
+  swellLen: [18, 22, 28, 34, 42],
+}
+
+/** FFT cascade tiles, lake-scaled (dusk ships 2642 m / 241 m — ocean fetch).
+ *  Order invariant: cascade 0 (waves) must stay larger than 1 (ripples). */
+const CASCADES = {
+  waves: { scale: 420, amplitudeScale: 0.2 },
+  ripples: { scale: 90, amplitudeScale: 0.083 },
 }
 
 /** Sky preset per tier band. */
@@ -86,6 +106,8 @@ export class ProWater {
 
     p.water = await WaterSystem.create(renderer, scene, camera, 'high')
     p.water.loadPreset(getPresetParams('dusk'))
+    p.water.updateCascadeConfig(0, CASCADES.waves)
+    p.water.updateCascadeConfig(1, CASCADES.ripples)
 
     // ---- sky → water reflection bridge ----
     // Sky Pro 1.0's provider adapter speaks Water Pro 2.x; v3.1's setSky
@@ -159,17 +181,20 @@ export class ProWater {
     this.water.wake.foamPersistence = 0.988
   }
 
-  /** Scale the wake with throttle — planing hulls dig harder. */
+  /** Scale the wake with throttle — planing hulls dig harder. Saturating
+   *  curve, not linear: past ~25 m/s a planing hull rides OUT of the water,
+   *  so displacement stops growing (the old linear ramp at 150 mph churned
+   *  the whole basin into froth). */
   setBoatSpeed(speedMps: number): void {
     if (this.sternWakeId < 0) return
-    const k = Math.min(1, speedMps / 30)
+    const k = 1 - Math.exp(-speedMps / 14)
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: 0.55 + k * 1.5,
-      radius: 1.9 + k * 2.1,
+      depth: 0.55 + k * 0.75,
+      radius: 1.9 + k * 1.3,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: 0.4 + k * 0.7,
-      radius: 1.5 + k * 1.0,
+      depth: 0.4 + k * 0.4,
+      radius: 1.5 + k * 0.7,
     })
   }
 
@@ -191,6 +216,12 @@ export class ProWater {
         standingWaveRatio: 0,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any)
+      this.water.gerstner.update({
+        amplitude: lerpA(WATER_TIERS.swellAmp, tierT),
+        wavelength: lerpA(WATER_TIERS.swellLen, tierT),
+        wavelengthSpread: 1.6,
+        directionalSpread: 0.9,
+      })
     }
 
     const skyBand = Math.min(4, Math.floor(tierT + skyDark))
