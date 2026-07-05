@@ -19,7 +19,7 @@ import { LakeDressing } from './scene/dressing'
 import { ProWater } from './scene/proWater'
 
 /** Licensed Water Pro + Sky Pro pipeline (gitignored libs, local builds). */
-const USE_PRO = true
+const PREFER_PRO = true
 import { Speedometer } from './ui/speedometer'
 import { LofiRadio } from './core/lofiRadio'
 import { Minimap } from './ui/minimap'
@@ -84,6 +84,10 @@ async function boot(): Promise<void> {
 
   const backend = renderer.backend as { isWebGPUBackend?: boolean }
   const rendererPath = backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2'
+  // Water Pro's WebGL 2 fallback path is untuned and reads as a different,
+  // broken world (dithered sky, wrong colors). Non-WebGPU browsers — old
+  // phones, insecure http origins — get the round-5 legacy stack instead.
+  const USE_PRO = PREFER_PRO && rendererPath === 'WebGPU'
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
   renderer.setSize(window.innerWidth, window.innerHeight)
