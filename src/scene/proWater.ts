@@ -173,7 +173,10 @@ export class ProWater {
     // Lake-scale wake tune for a HEALTHY solver (the old 1.4/0.4 values
     // were panic-damping against the r185-corrupted sim): moderately
     // damped trails, foam on real crests only.
-    p.water.wake.friction = 0.5
+    // 0.9 not 0.5: the dt clamp runs the sim at ~40% speed at 25fps, so
+    // decay must be stiffer than real-lake values for trails to die on
+    // a human timescale
+    p.water.wake.friction = 0.9
     p.water.wake.foamStrength = 0.7
     p.water.wake.foamBreakThreshold = 0.2
 
@@ -199,6 +202,18 @@ export class ProWater {
     const flags = new URLSearchParams(location.search)
     p.water.wake.enabled = !flags.has('nowake')
     if (p.water.spray) p.water.spray.enabled = !flags.has('nospray')
+
+    // The X-smear / trailing streaks / spawn spikes (survived the r183
+    // fix): the camera-anchored foam ACCUMULATION buffer smears its
+    // contents whenever its window shifts — catastrophically on our
+    // teleporting C-preset cameras (giant X), continuously at driving
+    // speed (streak field trailing the boat). Surface + shoreline foam
+    // stay on; only the accumulation layer goes.
+    p.water.foam.waves.enabled = false
+
+    // ?nofog probe for the tan bottom-of-screen haze band (set at
+    // create-time — post-build toggles black-screen)
+    if (flags.has('nofog')) p.water.fog.enabled = false
 
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
