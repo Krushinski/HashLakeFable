@@ -179,6 +179,17 @@ export class ProWater {
     // dipped near the displaced surface ("chopped out" in C-angles).
     p.water.underwater.enabled = false
 
+    // ROOT-CAUSE A/B: the wake displacement field is the prime suspect
+    // for every remaining horror — the churn zone that travels with the
+    // boat (field is camera-centered), the world-aligned straight seams
+    // ("brown banner" = field rim), the rest-glitch (buoyancy reads the
+    // field under the hull), and the refusal to EVER calm down (a field
+    // that ignores friction has gone NaN — NaN × damping = NaN forever;
+    // possibly the wake compute misbehaving on r185 vs the r183 the lib
+    // was built for). OFF by default until proven innocent; append
+    // ?wake to the URL to re-enable for comparison.
+    p.water.wake.enabled = new URLSearchParams(location.search).has('wake')
+
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
     // and wet beach read as the same brown, hiding the shoreline.
