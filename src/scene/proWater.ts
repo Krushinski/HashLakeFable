@@ -220,9 +220,24 @@ export class ProWater {
     // and wet beach read as the same brown, hiding the shoreline.
     // Stronger red-first extinction sinks the bed into teal by ~2-3 m
     // depth, so the waterline becomes a legible color edge.
-    p.water.color.absorptionColor = '#6b3a22'
+    // "Boat in a brown void" root cause: at steep view angles water
+    // reflects ~nothing (Fresnel), so the frame shows pure transmitted
+    // bed — flat tan, zero surface cues — and the eye reads NO WATER
+    // (also the tan bottom-band at normal angles, and the "exposed
+    // propeller": the submerged hull seen through clear water). Cures:
+    // deeper extinction, darker body, visible refraction wobble, and
+    // stronger normal response so the surface reads at nadir.
+    p.water.color.absorptionColor = '#7d4526'
     p.water.color.transmissionColor = '#2e7b6e'
-    p.water.color.waterColor = '#123f4a'
+    p.water.color.waterColor = '#0f3540'
+    p.water.fresnel.refractionStrength = 0.35
+    p.water.fresnel.normalStrength = 1.25
+
+    // never configured, never wanted (our own rain system does the
+    // visuals): the rain ripple field is the next suspect for the
+    // C-press streak lines
+    p.water.rain.particles.enabled = false
+    p.water.rain.ripples.enabled = false
 
     // sun sparkle aliases into hard white spikes at grazing near-field
     // angles (the bottom-left "scratch lines") — keep the glitter, push
