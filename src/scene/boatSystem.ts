@@ -391,20 +391,28 @@ export class BoatSystem {
   }
 
   /** Hard-locked drive camera pose for the active preset. */
+  private camHeave = 0
+
   driveCamera(camera: THREE.PerspectiveCamera, dt: number): void {
     const p = DRIVE_PRESETS[this.presetIndex]
     const dirX = Math.sin(this.heading)
     const dirZ = -Math.cos(this.heading)
+    // The camera position is damped below, but lookAt is instantaneous —
+    // aiming it at raw heave whips the whole frame vertically on every
+    // buoyancy jitter (the "hurricane camera" at speed). The camera
+    // tracks its own slow heave instead; the hull can bob without
+    // shaking the horizon.
+    this.camHeave += (this.heave - this.camHeave) * (1 - Math.exp(-dt * 3.5))
     const targetPos = new THREE.Vector3(
       this.x - dirX * p.back,
-      this.heave + p.up,
+      this.camHeave + p.up,
       this.z - dirZ * p.back,
     )
     const blend = 1 - Math.exp(-dt * 5.5)
     camera.position.lerp(targetPos, blend)
     camera.lookAt(
       this.x + dirX * p.lookAhead,
-      this.heave + p.lookUp,
+      this.camHeave + p.lookUp,
       this.z + dirZ * p.lookAhead,
     )
   }

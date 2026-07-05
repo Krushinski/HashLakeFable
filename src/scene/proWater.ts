@@ -179,6 +179,15 @@ export class ProWater {
     // dipped near the displaced surface ("chopped out" in C-angles).
     p.water.underwater.enabled = false
 
+    // THE BANNER, actual root cause (survived every other fix): Water
+    // Pro clips the water surface at a plane near the camera to draw
+    // its underwater-transition meniscus — everything between camera
+    // and that plane exposes the naked lakebed as a hard-edged band
+    // across the frame bottom. We never cross the surface, so collapse
+    // the clip to nothing and drop the meniscus with it.
+    p.water.clipPlaneDistance = 0.05
+    p.water.waterline.enabled = false
+
     // ROOT-CAUSE A/B: the wake displacement field is the prime suspect
     // for every remaining horror — the churn zone that travels with the
     // boat (field is camera-centered), the world-aligned straight seams
