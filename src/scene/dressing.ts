@@ -37,11 +37,12 @@ async function loadPrims(
       Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
     ) as THREE.MeshStandardMaterial
     mat.roughness = Math.max(mat.roughness ?? 1, 0.7)
-    if (mat.transparent || mat.alphaTest > 0) {
-      mat.transparent = false
-      mat.alphaTest = 0.32
-      mat.side = THREE.DoubleSide
-    }
+    // photoscan meshes arrive with holes and flipped faces — render both
+    // sides, fully opaque, or they read grainy/see-through
+    mat.side = THREE.DoubleSide
+    mat.transparent = false
+    mat.depthWrite = true
+    if (mat.alphaTest > 0) mat.alphaTest = 0.32
     if (!roots.has(root.name)) roots.set(root.name, [])
     roots.get(root.name)!.push({ geometry: geo, material: mat })
   })
@@ -122,7 +123,8 @@ export class LakeDressing {
       const x = ISLAND.cx + Math.sin(ang) * rad
       const z = ISLAND.cz + Math.cos(ang) * rad
       if (heroRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 90)) continue
-      heroRocks.push({ x, z, s: 1.8 + rand() * 2.4, rot: rand() * Math.PI * 2 })
+      // bigger: these are the island's guardian stones
+      heroRocks.push({ x, z, s: 2.6 + rand() * 3.2, rot: rand() * Math.PI * 2 })
     }
     for (let i = 0; i < 900 && shoreRocks.length < 46; i++) {
       const ang = rand() * Math.PI * 2
@@ -137,8 +139,9 @@ export class LakeDressing {
       if (shoreRocks.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 700)) continue
       shoreRocks.push({ x, z, s: 1.4 + rand() * 2.6, rot: rand() * Math.PI * 2 })
     }
-    // hero rocks (detailed variant), shore rocks (light variant, instanced)
-    const hero = rockVariants[0]
+    // both pools use the CLEAN scan (variant 0 decimated badly — grainy
+    // and see-through on the island; the light variant reads solid)
+    const hero = rockVariants[1] ?? rockVariants[0]
     for (const r of heroRocks) {
       for (const p of hero) {
         const m = new THREE.Mesh(p.geometry, p.material)
@@ -221,10 +224,12 @@ export class LakeDressing {
   private buildDock(): void {
     const sz = 110
     // walk from open water toward land; stop at the water's edge, then
-    // pull back so the first plank starts ON the beach
+    // pull back so the first plank starts ON the beach. The inlet plus
+    // shoreline wobble can run past -800 — march until we truly exit.
     let sx = -585
-    for (let i = 0; i < 60 && shoreSdf(sx, sz) < 0; i++) sx -= 3
-    const startX = sx + 4 // slightly inland of the waterline
+    for (let i = 0; i < 200 && shoreSdf(sx, sz) < 0; i++) sx -= 2
+    if (shoreSdf(sx, sz) < 0) sx = -760 // safety anchor
+    const startX = sx + 3 // slightly inland of the waterline
     const LEN = 22
     const deckY = 0.72
     const rand = seededRandom(777333)

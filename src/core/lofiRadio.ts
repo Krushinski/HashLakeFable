@@ -1,107 +1,72 @@
 /**
- * Lofi hip-hop radio (user-directed): the ChilledCow / Lofi Girl 24/7
- * stream ("beats to relax/study to", jfKfPfyJRdk) — zero cost, zero assets.
+ * Chill radio (user-directed), v4 — no more YouTube.
  *
- * v3: the raw-embed + postMessage approach failed twice on this machine,
- * so this is the OFFICIAL YouTube IFrame API — YT.Player with an onReady
- * that unmutes and plays. Created inside the M keypress (user gesture) so
- * Chrome's autoplay delegation applies. The API script loads once, lazily,
- * only after the user first asks for music.
+ * The Lofi Girl LIVE embed refuses playback ("live stream recording is
+ * not available") — live-stream embeds are gated in ways we can't fix
+ * from the outside. So: a plain HTML5 <audio> pointed at SomaFM's
+ * Groove Salad (chilled, ad-free, listener-supported — credited in
+ * CREDITS.md), with a styled mini chip instead of a video box. Created
+ * inside the M keypress, so autoplay policy is satisfied by the gesture.
  */
 
-interface YTPlayer {
-  unMute(): void
-  setVolume(v: number): void
-  playVideo(): void
-  destroy(): void
-}
-
-interface YTNamespace {
-  Player: new (
-    el: HTMLElement,
-    opts: {
-      width: number
-      height: number
-      videoId: string
-      playerVars: Record<string, string | number>
-      events: { onReady: (e: { target: YTPlayer }) => void }
-    },
-  ) => YTPlayer
-}
-
-declare global {
-  interface Window {
-    YT?: YTNamespace & { loaded?: number }
-    onYouTubeIframeAPIReady?: () => void
-  }
-}
+const STREAMS = [
+  { url: 'https://ice1.somafm.com/groovesalad-256-mp3', label: 'SOMA FM · GROOVE SALAD' },
+  { url: 'https://ice2.somafm.com/groovesalad-128-mp3', label: 'SOMA FM · GROOVE SALAD' },
+  { url: 'https://ice1.somafm.com/fluid-128-mp3', label: 'SOMA FM · FLUID' },
+]
 
 export class LofiRadio {
-  private player: YTPlayer | null = null
-  private host: HTMLDivElement | null = null
+  private audio: HTMLAudioElement | null = null
+  private chip: HTMLDivElement | null = null
+  private streamIndex = 0
   enabled = false
 
   toggle(): boolean {
     if (this.enabled) {
-      this.player?.destroy()
-      this.player = null
-      this.host?.remove()
-      this.host = null
+      this.audio?.pause()
+      this.audio?.remove()
+      this.audio = null
+      this.chip?.remove()
+      this.chip = null
       this.enabled = false
       return false
     }
     this.enabled = true
 
-    // VISIBLE mini player, bottom-right: YouTube treats viewable players
-    // as first-class (offscreen ones get throttled/refused in some
-    // profiles), and the user can SEE any error the embed reports —
-    // no more silent mystery
-    this.host = document.createElement('div')
-    this.host.style.cssText =
-      'position:fixed;right:16px;bottom:16px;width:224px;height:126px;' +
-      'z-index:44;border-radius:12px;overflow:hidden;' +
-      'border:1px solid rgba(69,200,192,0.25);' +
-      'box-shadow:0 6px 28px rgba(0,0,0,0.45);opacity:0.94;'
-    const inner = document.createElement('div')
-    this.host.appendChild(inner)
-    document.body.appendChild(this.host)
+    const chip = document.createElement('div')
+    chip.id = 'radio-chip'
+    chip.innerHTML =
+      '<span class="radio-dot"></span><span class="radio-label">TUNING…</span>'
+    document.body.appendChild(chip)
+    this.chip = chip
 
-    const boot = () => {
-      // user may have toggled off while the API script was loading
-      if (!this.enabled || !this.host) return
-      this.player = new window.YT!.Player(inner, {
-        width: 224,
-        height: 126,
-        videoId: 'jfKfPfyJRdk',
-        playerVars: {
-          autoplay: 1,
-          playsinline: 1,
-          controls: 1,
-        },
-        events: {
-          onReady: (e) => {
-            e.target.unMute()
-            e.target.setVolume(75)
-            e.target.playVideo()
-          },
-        },
-      })
-    }
+    const audio = document.createElement('audio')
+    audio.crossOrigin = 'anonymous'
+    audio.preload = 'none'
+    audio.volume = 0.65
+    document.body.appendChild(audio)
+    this.audio = audio
 
-    if (window.YT?.Player) {
-      boot()
-    } else {
-      const prev = window.onYouTubeIframeAPIReady
-      window.onYouTubeIframeAPIReady = () => {
-        prev?.()
-        boot()
+    const label = chip.querySelector('.radio-label') as HTMLSpanElement
+    const tryStream = (i: number) => {
+      if (!this.enabled || !this.audio) return
+      if (i >= STREAMS.length) {
+        label.textContent = 'RADIO UNREACHABLE'
+        chip.classList.add('err')
+        return
       }
-      if (!document.querySelector('script[src*="iframe_api"]')) {
-        const s = document.createElement('script')
-        s.src = 'https://www.youtube.com/iframe_api'
-        document.head.appendChild(s)
-      }
+      this.streamIndex = i
+      this.audio.src = STREAMS[i].url
+      this.audio
+        .play()
+        .then(() => {
+          label.textContent = STREAMS[i].label
+          chip.classList.remove('err')
+        })
+        .catch(() => tryStream(i + 1))
     }
+    audio.addEventListener('error', () => tryStream(this.streamIndex + 1))
+    tryStream(0)
     return true
   }
 }

@@ -201,7 +201,7 @@ export class ForestSystem {
 
     interface ImpSlot { x: number; z: number; scale: number; rot: number }
     const impSlots: ImpSlot[] = []
-    for (let i = 0; i < 11000 && impSlots.length < 2400; i++) {
+    for (let i = 0; i < 16000 && impSlots.length < 3200; i++) {
       const ang = rand() * Math.PI * 2
       const rad = 640 + rand() * 1500
       const x = Math.sin(ang) * rad
@@ -212,7 +212,7 @@ export class ForestSystem {
       if (h > 140) continue // hug the lake bowl — high trees read as ants
       let ok = true
       for (const p of impSlots) {
-        if ((p.x - x) ** 2 + (p.z - z) ** 2 < 88) { ok = false; break }
+        if ((p.x - x) ** 2 + (p.z - z) ** 2 < 62) { ok = false; break }
       }
       if (!ok) continue
       impSlots.push({ x, z, scale: 0.65 + rand() * 0.6, rot: rand() * Math.PI })

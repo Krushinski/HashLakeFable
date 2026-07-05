@@ -204,6 +204,26 @@ function farRangeHeight(x: number, z: number): number {
 
 export class FarRanges {
   constructor(scene: THREE.Scene) {
+    // valley mist bands — translucent haze strips at the range bases give
+    // the aerial-perspective depth of the webgpu fog reference
+    const mist = new THREE.MeshBasicMaterial({
+      color: 0xcfdce2,
+      transparent: true,
+      opacity: 0.07,
+      depthWrite: false,
+    })
+    for (const [z, y, h, op] of [
+      [-1480, 95, 130, 0.075],
+      [-1950, 150, 190, 0.06],
+      [-2500, 220, 260, 0.05],
+    ]) {
+      const m = mist.clone()
+      m.opacity = op
+      const band = new THREE.Mesh(new THREE.PlaneGeometry(8200, h), m)
+      band.position.set(0, y, z)
+      band.renderOrder = 12
+      scene.add(band)
+    }
     const geo = new THREE.PlaneGeometry(9000, 9000, 160, 160)
     geo.rotateX(-Math.PI / 2)
     const pos = geo.attributes.position as THREE.BufferAttribute
@@ -353,9 +373,15 @@ export class TerrainSystem {
         .mul(smoothstep(float(160), float(280), vHeight))
         .mul(patch.mul(0.5).add(0.5))
 
-      const slopeRock = smoothstep(float(0.35), float(0.62), vSlope)
-      const altRock = smoothstep(float(210), float(330), vHeight)
-      const rockMask = slopeRock.max(altRock)
+      // granite claims the slopes earlier and lower — the hero range
+      // reads stone-first, green-second (§user: away from pure green)
+      const slopeRock = smoothstep(float(0.28), float(0.52), vSlope)
+      const altRock = smoothstep(float(150), float(255), vHeight)
+      const graniteVein = mx_noise_float(vec3(worldXZ.mul(0.0026), 31.7))
+        .mul(0.5).add(0.5)
+      const veinMask = smoothstep(float(0.58), float(0.78), graniteVein)
+        .mul(smoothstep(float(60), float(150), vHeight))
+      const rockMask = slopeRock.max(altRock).max(veinMask.mul(0.85))
 
       // subalpine golden band where the meadow thins into rock
       const subalpine = color(0x96914e)

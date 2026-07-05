@@ -15,7 +15,8 @@ originals. Third-party assets used under license:
   https://sketchfab.com/3d-models/dc894acc16544bc69630e9a5232cf74c
 - **Boulders** — "Boulder 01" and "Namaqualand Boulder 02", Poly Haven, CC0.
 - **Spruce bark ("pine_bark")** — Poly Haven, CC0.
-- **Lofi radio** — the Lofi Girl (ChilledCow) 24/7 stream, embedded via
-  YouTube; plays only on user request (M).
+- **Radio (M key)** — SomaFM (somafm.com), listener-supported,
+  commercial-free internet radio. Streams play only on user request.
+  If you enjoy the music, support them: https://somafm.com/support/
 
 Live data: Coinbase Advanced Trade WebSocket, mempool.space public API.
