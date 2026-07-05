@@ -170,9 +170,12 @@ export class ProWater {
     // laps inject energy faster than the field damps, so the basin
     // whips into permanent white peaks ("nightmare physics"). A lake
     // is stiffer and only foams on genuinely breaking crests.
-    p.water.wake.friction = 1.4
-    p.water.wake.foamStrength = 0.4
-    p.water.wake.foamBreakThreshold = 0.35
+    // Lake-scale wake tune for a HEALTHY solver (the old 1.4/0.4 values
+    // were panic-damping against the r185-corrupted sim): moderately
+    // damped trails, foam on real crests only.
+    p.water.wake.friction = 0.5
+    p.water.wake.foamStrength = 0.7
+    p.water.wake.foamBreakThreshold = 0.2
 
     // Nobody dives in this game — and the underwater pass is what
     // painted the teal band across the screen bottom whenever a camera
@@ -188,20 +191,14 @@ export class ProWater {
     p.water.clipPlaneDistance = 0.05
     p.water.waterline.enabled = false
 
-    // Two GPU field/particle sims are CONVICTED of r185 corruption and
-    // parked (not deleted — flags re-enable them for A/B the moment we
-    // have a fix or a vendor patch):
-    //   ?wake   wake displacement field (exploding: mountain-trail churn)
-    //   ?spray  crest spray compute particles — dusk ships it ENABLED and
-    //           unconfigured it ran corrupted since day one: the
-    //           rectangular garbage field at spawn, the stretched spike
-    //           streaks (bottom-left "scratch lines"), the mist blob
-    //           around the hull.
-    // (The earlier ?nossr/?nofoam flags are gone — toggling those after
-    // pipeline build black-screens; lesson learned.)
+    // CASE CLOSED (a week of "convictions" traced to ONE crime): the
+    // wake explosion, spray garbage field, foam-buffer X — all of it
+    // was three.js r185 corrupting GPU sims built for r183. On r183
+    // every system runs healthy, so the bells are ON by default again;
+    // kill-switch flags remain for A/B: ?nowake ?nospray.
     const flags = new URLSearchParams(location.search)
-    p.water.wake.enabled = flags.has('wake')
-    if (p.water.spray) p.water.spray.enabled = flags.has('spray')
+    p.water.wake.enabled = !flags.has('nowake')
+    if (p.water.spray) p.water.spray.enabled = !flags.has('nospray')
 
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
@@ -236,25 +233,19 @@ export class ProWater {
       rotationSmoothing: 0.16,
       rotationInfluence: 0.75,
     })
-    // With the wake field parked, keep its generators off the books
-    // entirely — even with wake.enabled=false, registered generators
-    // kept the wake FOAM channel accumulating garbage (the rectangular
-    // glitch field at spawn, the splotchy halo around the hull).
+    // Generators only exist when the wake field runs (?nowake A/B).
     if (!this.water.wake.enabled) return
-    // Injection depths QUARTERED from the ocean-ish first guesses: at
-    // lake scale even 0.4m of continuously-injected displacement reads
-    // as a churned mountain trail once the field integrates it.
     this.bowWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.12,
-      radius: 1.3,
+      depth: 0.5,
+      radius: 1.6,
       offset: new THREE.Vector3(0, 0, 2.3),
     })
     this.sternWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.18,
-      radius: 1.6,
+      depth: 0.7,
+      radius: 1.9,
       offset: new THREE.Vector3(0, 0, -2.5),
     })
-    this.water.wake.foamPersistence = 0.7
+    this.water.wake.foamPersistence = 0.9
   }
 
   /** Scale the wake with throttle — planing hulls dig harder. Saturating
@@ -268,12 +259,12 @@ export class ProWater {
     const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.18 + k * 0.22) * idle,
-      radius: 1.6 + k * 0.8,
+      depth: (0.55 + k * 0.9) * idle,
+      radius: 1.9 + k * 1.6,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: (0.12 + k * 0.12) * idle,
-      radius: 1.3 + k * 0.5,
+      depth: (0.4 + k * 0.5) * idle,
+      radius: 1.5 + k * 0.9,
     })
   }
 
