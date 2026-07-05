@@ -319,6 +319,20 @@ export class BoatSystem {
       nz += (gz / glen) * shove
       this.speed *= Math.exp(-3.2 * dt)
     }
+
+    // Hard beaching cap (§user): the bow may nose a couple of metres
+    // into the sand — enough to beach deliberately — but land ends
+    // forward progress there. Without this, throttle vs. the decay
+    // above settles into an endless ~3 mph crawl that once carried the
+    // hull 40 m inland. Reverse stays free so a beached boat refloats.
+    const BEACH_LIMIT_SDF = 2.5
+    const BEACH_DEPTH = 0.25
+    if (
+      this.speed > 0 &&
+      (hereSdf > BEACH_LIMIT_SDF || depthHere < BEACH_DEPTH)
+    ) {
+      this.speed = 0
+    }
     this.x = nx
     this.z = nz
 

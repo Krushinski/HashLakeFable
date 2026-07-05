@@ -95,6 +95,7 @@ export class ProWater {
     const p = new ProWater()
     p.renderer = renderer
 
+    console.log('[boot] sky:create')
     p.sky = await SkySystem.create({
       renderer,
       camera,
@@ -102,8 +103,10 @@ export class ProWater {
       // mid-afternoon alpine light — high, bright sun
       timeOfDay: { time: 0.58 },
     })
+    console.log('[boot] sky:preset')
     await p.sky.applyPreset(SKY_PRESETS.partlyCloudy)
 
+    console.log('[boot] water:create')
     p.water = await WaterSystem.create(renderer, scene, camera, 'high')
     p.water.loadPreset(getPresetParams('dusk'))
     p.water.updateCascadeConfig(0, CASCADES.waves)
@@ -115,6 +118,7 @@ export class ProWater {
     // spins up Sky Pro's equirect baker (ticked inside sky.update), and
     // we feed its texture — volumetric clouds included — to a Water Pro
     // Sky. PMREM refresh happens on a cadence in update().
+    console.log('[boot] sky:provider')
     const provider = p.sky.asSkyProvider({ envMap: { width: 512 } })
     for (const m of provider.getMeshes()) scene.add(m)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,6 +155,7 @@ export class ProWater {
     fog.skyBlendDistance = 2600
 
     // calm lake baseline
+    console.log('[boot] water:baseline')
     p.applyWeatherRaw(0, 0)
 
     scene.add(p.boatProxy)
