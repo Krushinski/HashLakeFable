@@ -188,16 +188,18 @@ export class ProWater {
     p.water.clipPlaneDistance = 0.05
     p.water.waterline.enabled = false
 
-    // ROOT-CAUSE A/B: the wake displacement field is the prime suspect
-    // for every remaining horror — the churn zone that travels with the
-    // boat (field is camera-centered), the world-aligned straight seams
-    // ("brown banner" = field rim), the rest-glitch (buoyancy reads the
-    // field under the hull), and the refusal to EVER calm down (a field
-    // that ignores friction has gone NaN — NaN × damping = NaN forever;
-    // possibly the wake compute misbehaving on r185 vs the r183 the lib
-    // was built for). OFF by default until proven innocent; append
-    // ?wake to the URL to re-enable for comparison.
-    p.water.wake.enabled = new URLSearchParams(location.search).has('wake')
+    // Diagnostic switches — every luxury defaults ON (they're paid-for
+    // bells); the params exist so each system's frame cost and artifact
+    // contribution can be isolated LIVE without redeploys:
+    //   ?wake      re-enable the wake field (CONVICTED: r185 explosion)
+    //   ?nossr     screen-space reflections off (scratch-line suspect)
+    //   ?nosparkle sun sparkle off
+    //   ?nofoam    ambient surface-foam blotches off
+    const flags = new URLSearchParams(location.search)
+    p.water.wake.enabled = flags.has('wake')
+    if (flags.has('nossr')) p.water.ssr.enabled = false
+    if (flags.has('nosparkle')) p.water.sparkle.enabled = false
+    if (flags.has('nofoam')) p.water.foam.surface.enabled = false
 
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
@@ -311,8 +313,10 @@ export class ProWater {
       this.water.lighting.sun.direction.value.copy(skySun.direction.value)
     }
     // refresh the reflection PMREM from the re-baked sky at a low cadence
+    // (6s — at 1.5s the PMREM prefilter spiked the GPU like clockwork,
+    // a metronome of hitches under way; the sky changes over minutes)
     this.envRefresh += dt
-    if (this.wpSky && this.envRefresh > 1.5) {
+    if (this.wpSky && this.envRefresh > 6) {
       this.envRefresh = 0
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(this.wpSky as any).uploadSource(this.renderer)

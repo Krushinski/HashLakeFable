@@ -89,7 +89,10 @@ async function boot(): Promise<void> {
   // phones, insecure http origins — get the round-5 legacy stack instead.
   const USE_PRO = PREFER_PRO && rendererPath === 'WebGPU'
 
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
+  // Under Water Pro the per-pixel cost dominates: at 1.5 the 3050 shades
+  // ~2.2x the pixels of native 1080p. Frame pacing is upstream of the
+  // jitter/sky-smear complaints — sharpness can be bought back later.
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, USE_PRO ? 1.0 : 1.5))
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 0.5
