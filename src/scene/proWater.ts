@@ -154,6 +154,25 @@ export class ProWater {
     if ('end' in fog) fog.end = 5200
     fog.skyBlendDistance = 2600
 
+    // ---- lake tuning pass 1 (verify live on pages.dev) ----
+    // Wake field: dusk ships ocean physics — trail damping γ 0.25 and
+    // foamBreakThreshold 0, i.e. foam at ANY surface steepness. Fast
+    // laps inject energy faster than the field damps, so the basin
+    // whips into permanent white peaks ("nightmare physics"). A lake
+    // is stiffer and only foams on genuinely breaking crests.
+    p.water.wake.friction = 0.85
+    p.water.wake.foamStrength = 0.55
+    p.water.wake.foamBreakThreshold = 0.35
+
+    // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
+    // clear our sand-colored lakebed shows through everywhere — water
+    // and wet beach read as the same brown, hiding the shoreline.
+    // Stronger red-first extinction sinks the bed into teal by ~2-3 m
+    // depth, so the waterline becomes a legible color edge.
+    p.water.color.absorptionColor = '#6b3a22'
+    p.water.color.transmissionColor = '#2e7b6e'
+    p.water.color.waterColor = '#123f4a'
+
     // calm lake baseline
     console.log('[boot] water:baseline')
     p.applyWeatherRaw(0, 0)
@@ -183,7 +202,7 @@ export class ProWater {
       radius: 1.9,
       offset: new THREE.Vector3(0, 0, -2.5),
     })
-    this.water.wake.foamPersistence = 0.988
+    this.water.wake.foamPersistence = 0.94
   }
 
   /** Scale the wake with throttle — planing hulls dig harder. Saturating

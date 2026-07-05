@@ -325,7 +325,7 @@ export class BoatSystem {
     // forward progress there. Without this, throttle vs. the decay
     // above settles into an endless ~3 mph crawl that once carried the
     // hull 40 m inland. Reverse stays free so a beached boat refloats.
-    const BEACH_LIMIT_SDF = 2.5
+    const BEACH_LIMIT_SDF = 1.2
     const BEACH_DEPTH = 0.25
     if (
       this.speed > 0 &&
