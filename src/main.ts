@@ -605,7 +605,11 @@ async function boot(): Promise<void> {
       fpsFrames = 0
       updatePill()
     }
-    governor.update(rawDt, fps)
+    // Governor is legacy-only: under Pro it ratcheted pixelRatio toward
+    // 0.5x forever (recovery needs 55fps — unreachable), overriding the
+    // fixed 1.0 cap, and every step left the sky's temporal history on
+    // the wrong grid (permanent cloud smear). Pro runs a FIXED ratio.
+    if (!USE_PRO) governor.update(rawDt, fps)
 
     if (!firstFrameShown) {
       firstFrameShown = true

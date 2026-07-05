@@ -212,6 +212,11 @@ export class ProWater {
     p.water.color.transmissionColor = '#2e7b6e'
     p.water.color.waterColor = '#123f4a'
 
+    // sun sparkle aliases into hard white spikes at grazing near-field
+    // angles (the bottom-left "scratch lines") — keep the glitter, push
+    // it past the aliasing zone
+    p.water.sparkle.minDistance = 40
+
     // calm lake baseline
     console.log('[boot] water:baseline')
     p.applyWeatherRaw(0, 0)
@@ -231,6 +236,11 @@ export class ProWater {
       rotationSmoothing: 0.16,
       rotationInfluence: 0.75,
     })
+    // With the wake field parked, keep its generators off the books
+    // entirely — even with wake.enabled=false, registered generators
+    // kept the wake FOAM channel accumulating garbage (the rectangular
+    // glitch field at spawn, the splotchy halo around the hull).
+    if (!this.water.wake.enabled) return
     // Injection depths QUARTERED from the ocean-ish first guesses: at
     // lake scale even 0.4m of continuously-injected displacement reads
     // as a churned mountain trail once the field integrates it.
@@ -244,7 +254,7 @@ export class ProWater {
       radius: 1.6,
       offset: new THREE.Vector3(0, 0, -2.5),
     })
-    this.water.wake.foamPersistence = 0.94
+    this.water.wake.foamPersistence = 0.7
   }
 
   /** Scale the wake with throttle — planing hulls dig harder. Saturating
