@@ -107,7 +107,15 @@ export class ProWater {
     await p.sky.applyPreset(SKY_PRESETS.partlyCloudy)
 
     console.log('[boot] water:create')
-    p.water = await WaterSystem.create(renderer, scene, camera, 'high')
+    // deterministic = FIXED 1/60 substeps. Without it, one host frame =
+    // one sim step at raw dt: at 14-20 fps that's a 50-70ms step, past
+    // the wake solver's stability limit — the field EXPLODES into
+    // jagged peaks that no amount of friction can damp (the "nightmare
+    // physics" / hurricane-shake session).
+    p.water = await WaterSystem.create(renderer, scene, camera, 'high', {
+      deterministic: true,
+      stepSize: 1 / 60,
+    })
     p.water.loadPreset(getPresetParams('dusk'))
     p.water.updateCascadeConfig(0, CASCADES.waves)
     p.water.updateCascadeConfig(1, CASCADES.ripples)
@@ -208,16 +216,19 @@ export class ProWater {
   /** Scale the wake with throttle — planing hulls dig harder. Saturating
    *  curve, not linear: past ~25 m/s a planing hull rides OUT of the water,
    *  so displacement stops growing (the old linear ramp at 150 mph churned
-   *  the whole basin into froth). */
+   *  the whole basin into froth). Idle ramp: a parked hull displaces
+   *  nothing worth simulating — without it the generators pump the field
+   *  24/7 (endless rings + scratch streaks around a resting boat). */
   setBoatSpeed(speedMps: number): void {
     if (this.sternWakeId < 0) return
+    const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: 0.55 + k * 0.75,
+      depth: (0.55 + k * 0.75) * idle,
       radius: 1.9 + k * 1.3,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: 0.4 + k * 0.4,
+      depth: (0.4 + k * 0.4) * idle,
       radius: 1.5 + k * 0.7,
     })
   }
@@ -257,6 +268,11 @@ export class ProWater {
 
   /** Advance both simulations. Water update is async (GPU readbacks). */
   async update(dt: number): Promise<void> {
+    // clamp to TWO fixed substeps max: more substeps per frame = more
+    // GPU sync points = lower fps = even more substeps (death spiral —
+    // measured: pinned at 1 fps with a 0.1s clamp). Below 30 fps the
+    // water simply runs a touch slow-motion instead.
+    dt = Math.min(dt, 2 / 60)
     this.sky.update(dt)
     // keep the water's sun/light in step with Sky Pro's sun
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
