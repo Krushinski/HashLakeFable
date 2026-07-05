@@ -126,7 +126,7 @@ export class LakeDressing {
       // bigger: these are the island's guardian stones
       heroRocks.push({ x, z, s: 2.6 + rand() * 3.2, rot: rand() * Math.PI * 2 })
     }
-    for (let i = 0; i < 900 && shoreRocks.length < 46; i++) {
+    for (let i = 0; i < 1500 && shoreRocks.length < 68; i++) {
       const ang = rand() * Math.PI * 2
       const rad = 480 + rand() * 520
       const x = Math.sin(ang) * rad
@@ -189,7 +189,7 @@ export class LakeDressing {
       roughness: 0.95,
     })
     const bushSlots: { x: number; z: number; s: number }[] = []
-    for (let i = 0; i < 1400 && bushSlots.length < 110; i++) {
+    for (let i = 0; i < 3200 && bushSlots.length < 250; i++) {
       const ang = rand() * Math.PI * 2
       const rad = 470 + rand() * 560
       const x = Math.sin(ang) * rad
@@ -197,7 +197,7 @@ export class LakeDressing {
       const s = shoreSdf(x, z)
       if (s < 3 || s > 46) continue
       if (terrainHeight(x, z) > 12) continue
-      if (bushSlots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 60)) continue
+      if (bushSlots.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 34)) continue
       bushSlots.push({ x, z, s: 0.9 + rand() * 1.7 })
     }
     const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushSlots.length)

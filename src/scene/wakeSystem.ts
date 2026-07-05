@@ -139,6 +139,8 @@ export class WakeSystem {
   private readonly bowSpray: SprayPool
   private readonly rooster: SprayPool
   private readonly streaks: SprayPool
+  private readonly fizz: SprayPool
+  private fizzCarry = 0
   private readonly boil: THREE.Mesh
   private readonly boilOpacity = { value: 0 }
   private sprayCarry = 0
@@ -223,6 +225,9 @@ export class WakeSystem {
     this.rooster = new SprayPool(scene, 260, 1.25, 0.42)
     // skimming streaks: small fast droplets thrown flat across the water
     this.streaks = new SprayPool(scene, 520, 0.3, 0.5)
+    // fizz: tiny short-lived bubbles popping out of the churned water —
+    // the carbonated life of motor-disturbed water (§user)
+    this.fizz = new SprayPool(scene, 700, 0.17, 0.7)
 
     // ---- transom boil: the churning prop wash right off the engine ----
     // two counter-scrolling foam samples multiplied = live bubbling; it
@@ -367,9 +372,35 @@ export class WakeSystem {
         )
       }
     }
+    if (speed > 4) {
+      // fizz erupting from the boil zone — dense, tiny, dies fast
+      const rate = Math.min(560, 60 + speed * 11)
+      this.fizzCarry += rate * dt
+      const fx = b.x - dirX * 3.4
+      const fz = b.z - dirZ * 3.4
+      const fy = this.waveField.heightAt(fx, fz, this.waveField.time)
+      let k = 0
+      while (this.fizzCarry >= 1 && k < 40) {
+        this.fizzCarry -= 1
+        k++
+        const rr = Math.sqrt((k * 0.37) % 1) * (1.5 + Math.min(1, speed / 24) * 1.6)
+        const aa = k * 2.399963
+        this.fizz.emit(
+          fx + Math.cos(aa) * rr - dirX * ((k * 0.61) % 1) * 4,
+          fy + 0.08,
+          fz + Math.sin(aa) * rr - dirZ * ((k * 0.61) % 1) * 4,
+          -dirX * speed * 0.06,
+          0.5 + ((k * 0.83) % 1) * 0.9,
+          -dirZ * speed * 0.06,
+          0.7,
+          0.34,
+        )
+      }
+    }
     this.bowSpray.update(dt)
     this.rooster.update(dt)
     this.streaks.update(dt)
+    this.fizz.update(dt)
 
     // ------------------------------------------------------ foam ribbons
     const pos = this.geometry.attributes.position as THREE.BufferAttribute

@@ -1158,3 +1158,27 @@ body {
   border: 1px solid var(--rg-hairline);
   font-family: var(--rg-font-ui);
 }
+
+/* Regalia toasts, interim size correction — the handoff cards were too
+   large over gameplay; tightened here until the Design v2 round */
+#toast-host,
+#toast-host[data-mode='frame'],
+#toast-host[data-mode='drive'] {
+  width: 288px;
+  gap: 8px;
+}
+.toast {
+  grid-template-columns: 24px 1fr auto;
+  gap: 9px;
+  padding: 9px 11px 11px 13px;
+  border-radius: 12px;
+}
+.toast .t-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.toast .t-title { font-size: 12px; }
+.toast .t-detail { font-size: 10.5px; margin-top: 1px; }
+.toast .t-time { font-size: 9px; }
