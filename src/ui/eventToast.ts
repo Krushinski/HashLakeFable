@@ -1,7 +1,9 @@
 /**
- * Event toasts — Regalia cards (design handoff): near-solid dark cards,
- * gold hairline, glowing accent bar, icon chip, mono values, timestamp,
- * auto-dismiss timer bar. Stacked top-right, newest on top.
+ * Event toasts — Regalia v2 "whisper scale" (Design handoff 2): a
+ * jeweler's label, not a desktop notification. One visual line per
+ * event — bare 16px glyph · title · mono value on the right — plus a
+ * rare detail second line and a 1px accent timer. Max 3 visible,
+ * overflow queued, newest on top.
  */
 
 export type ToastType =
@@ -23,8 +25,11 @@ const TYPES: Record<ToastType, { glyph: string; accent: string }> = {
   info: { glyph: '·', accent: '#C9A24E' },
 }
 
+const MAX_VISIBLE = 3
+
 export class EventToast {
   private host: HTMLDivElement
+  private queue: Array<() => void> = []
 
   constructor() {
     this.host = document.createElement('div')
@@ -38,35 +43,36 @@ export class EventToast {
   }
 
   /**
-   * `detail` may contain **bold** spans — rendered mono in the accent
-   * color (values, per the design).
+   * `detail`'s first **bold** span becomes the right-hand mono value;
+   * the prose around it is dropped as non-essential (v2 anatomy). A
+   * detail with no bold span renders as the rare second line.
    */
   show(title: string, type: ToastType = 'info', detail = '', ms = 6000): void {
+    if (this.host.children.length >= MAX_VISIBLE) {
+      this.queue.push(() => this.show(title, type, detail, ms))
+      return
+    }
     const t = TYPES[type]
     const el = document.createElement('div')
     el.className = 'toast'
     el.style.setProperty('--accent', t.accent)
-    const time = new Date().toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-    const detailHtml = detail
-      ? `<div class="t-detail">${detail.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</div>`
-      : ''
+    const bold = detail.match(/\*\*(.+?)\*\*/)
+    const value = bold ? `<span class="t-value">${bold[1]}</span>` : ''
+    const detailHtml =
+      !bold && detail ? `<div class="t-detail">${detail}</div>` : ''
     el.innerHTML = `
-      <div class="t-icon">${t.glyph}</div>
-      <div class="t-body"><div class="t-title">${title}</div>${detailHtml}</div>
-      <div class="t-time">${time}</div>
-      <div class="t-timer"></div>`
+      <div class="t-row"><span class="t-glyph">${t.glyph}</span><span class="t-title">${title}</span>${value}</div>
+      ${detailHtml}
+      <div class="t-timer" style="animation-duration:${ms}ms"></div>`
     // newest on top
     this.host.prepend(el)
-    while (this.host.children.length > 4) {
-      this.host.removeChild(this.host.lastChild!)
-    }
     requestAnimationFrame(() => el.classList.add('in'))
     window.setTimeout(() => {
       el.classList.remove('in')
-      window.setTimeout(() => el.remove(), 700)
+      window.setTimeout(() => {
+        el.remove()
+        this.queue.shift()?.()
+      }, 320)
     }, ms)
   }
 }

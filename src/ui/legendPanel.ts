@@ -1,4 +1,33 @@
-/** Legend (§17.4) — what the Bitcoin weather world means. Toggled with L. */
+/**
+ * Legend — Regalia v2 L-key overlay (Design handoff 2): centered 420px
+ * card over a dimmed blurred backdrop. Storm tiers with the live
+ * stormindex on a five-stop scale bar (active tier highlighted), then
+ * the control keycap grid. Toggled with L.
+ */
+
+const TIERS = [
+  { name: 'Serene', range: '0–20', color: '#5FB39A', desc: 'flat seas, steady chain' },
+  { name: 'Uneasy', range: '20–40', color: '#C9A24E', desc: 'light chop, market stirring' },
+  { name: 'Volatile', range: '40–60', color: '#E3A857', desc: 'swells building, watch fees' },
+  { name: 'Storm', range: '60–80', color: '#D0623E', desc: 'heavy weather, hold course' },
+  { name: 'Apocalyptic', range: '80–100', color: '#B5341A', desc: 'maelstrom — all hands' },
+]
+
+const CONTROLS: Array<[string[], string]> = [
+  [['X'], 'drive mode'],
+  [['←', '→'], 'steer'],
+  [['Shift', 'Ctrl', 'Z'], 'boost'],
+  [['Space'], 'anchor'],
+  [['C'], 'cameras'],
+  [['D'], 'debug'],
+  [['L'], 'legend'],
+  [['M'], 'radio'],
+  [['F'], 'fullscreen'],
+  [['Enter'], 'save tableau'],
+  [['R'], 'reset'],
+  [['Esc'], 'exit'],
+]
+
 export class LegendPanel {
   private el: HTMLDivElement
   private visible = false
@@ -7,52 +36,57 @@ export class LegendPanel {
     this.el = document.createElement('div')
     this.el.id = 'legend-panel'
     this.el.hidden = true
+    const tiers = TIERS.map(
+      (t) => `
+      <div class="lg-tier">
+        <span class="lg-sw" style="background:${t.color}"></span>
+        <span class="lg-tn">${t.name}<i class="lg-rg">${t.range}</i></span>
+        <span class="lg-td">${t.desc}</span>
+      </div>`,
+    ).join('')
+    const controls = CONTROLS.map(
+      ([keys, act]) => `
+      <div class="lg-ctl">
+        <span class="lg-keys">${keys.map((k) => `<span class="lg-key">${k}</span>`).join('')}</span>
+        <span class="lg-act">${act}</span>
+      </div>`,
+    ).join('')
     this.el.innerHTML = `
-      <header>Hashlake — Legend</header>
-      <section>
-        <h4>The lake is Bitcoin weather</h4>
-        <p>Market and network conditions become sky, water, and light.
-        The 24-hour price move leads; the weekly trend, fees, and mempool
-        congestion weigh in behind it.</p>
-        <div class="legend-tiers">
-          <span class="t0">0–20 Serene</span><span class="t1">20–40 Uneasy</span>
-          <span class="t2">40–60 Volatile</span><span class="t3">60–80 Storm</span>
-          <span class="t4">80–100 Apocalyptic</span>
+      <div class="lg-card">
+        <div class="lg-head">
+          <h1>LEGEND</h1>
+          <div class="lg-hint">press <span class="lg-key">L</span> to close</div>
         </div>
-      </section>
-      <section>
-        <h4>Signals</h4>
-        <ul>
-          <li><b>Whale splash</b> — a transaction of 3+ BTC entered the
-          mempool. Splash size scales with the amount. Local only — whales
-          never change the weather.</li>
-          <li><b>Block pulse</b> — a new block was found. A clean ring runs
-          through the water beneath the boat.</li>
-          <li><b>Fog</b> — the data feeds have gone stale or uncertain.
-          Not an apocalypse; the lake waits for the chain.</li>
-        </ul>
-      </section>
-      <section>
-        <h4>Controls</h4>
-        <ul class="legend-keys">
-          <li><b>X</b> Drive Mode</li>
-          <li><b>Arrows</b> throttle & steer</li>
-          <li><b>Shift</b> boost · <b>Ctrl+Shift</b> super</li>
-          <li><b>Space</b> anchor</li>
-          <li><b>C</b> cameras</li>
-          <li><b>Enter</b> save tableau</li>
-          <li><b>Esc</b> exit drive</li>
-          <li><b>R</b> reset view</li>
-          <li><b>D</b> debug</li>
-          <li><b>L</b> legend</li>
-          <li><b>F</b> fullscreen</li>
-        </ul>
-      </section>`
+        <div class="lg-secrow">
+          <span class="lg-sec">STORM TIERS</span>
+          <span class="lg-cur">stormindex <b>—</b> · <span class="lg-tiername">—</span></span>
+        </div>
+        <div class="lg-scale"><div class="lg-marker"></div></div>
+        ${tiers}
+        <div class="lg-divider"></div>
+        <div class="lg-sec">CONTROLS</div>
+        <div class="lg-controls">${controls}</div>
+      </div>`
     document.body.appendChild(this.el)
   }
 
-  toggle(): boolean {
+  /** Reflect the live storm index: marker, readout, active tier row. */
+  setStorm(index: number): void {
+    const i = Math.max(0, Math.min(100, index))
+    const marker = this.el.querySelector('.lg-marker') as HTMLElement
+    marker.style.left = `${i}%`
+    this.el.querySelector('.lg-cur b')!.textContent = i.toFixed(1)
+    const band = Math.min(4, Math.floor(i / 20))
+    this.el.querySelector('.lg-tiername')!.textContent =
+      TIERS[band].name.toUpperCase()
+    this.el
+      .querySelectorAll('.lg-tier')
+      .forEach((row, n) => row.classList.toggle('on', n === band))
+  }
+
+  toggle(stormIndex?: number): boolean {
     this.visible = !this.visible
+    if (this.visible && stormIndex !== undefined) this.setStorm(stormIndex)
     this.el.hidden = !this.visible
     return this.visible
   }

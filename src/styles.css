@@ -948,100 +948,100 @@ body {
   color: var(--rg-dim);
 }
 
-/* ---------- toasts (Regalia cards, top-right) ---------- */
+/* ---------- toasts (Regalia v2 — whisper scale, top-right) ---------- */
 #toast-host,
 #toast-host[data-mode='frame'],
 #toast-host[data-mode='drive'] {
-  top: 26px;
-  right: 26px;
+  top: 22px;
+  right: 22px;
   left: auto;
   bottom: auto;
   transform: none;
-  width: 372px;
+  width: 260px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   align-items: stretch;
 }
 .toast {
   position: relative;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: 32px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 13px 14px 15px 17px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(21, 19, 16, 0.97), rgba(12, 11, 9, 0.97));
-  border: 1px solid var(--rg-hairline);
-  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+  max-width: 260px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(22, 20, 16, 0.96), rgba(13, 12, 9, 0.96));
+  border: 1px solid rgba(201, 162, 78, 0.18);
+  box-shadow:
+    0 10px 26px -14px rgba(0, 0, 0, 0.85),
+    0 1px 0 rgba(201, 162, 78, 0.08) inset;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   color: var(--rg-ivory);
   font-family: var(--rg-font-ui);
+  letter-spacing: normal;
   opacity: 0;
-  transform: translateX(30px) scale(0.98);
-  transition: opacity 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform: translateY(4px);
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
   --accent: #c9a24e;
 }
 .toast.in {
   opacity: 1;
   transform: none;
 }
-.toast::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent);
-}
-.toast .t-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+.toast .t-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  gap: 8px;
 }
-.toast .t-body {
-  min-width: 0;
+.toast .t-glyph {
+  flex: none;
+  width: 16px;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+  color: var(--accent);
 }
 .toast .t-title {
-  font-weight: 600;
-  font-size: 13.5px;
-  letter-spacing: 0.02em;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  color: #eee7d8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toast .t-value {
+  flex: none;
+  font-family: var(--rg-font-mono);
+  font-size: 12px;
+  letter-spacing: -0.02em;
+  color: var(--accent);
 }
 .toast .t-detail {
-  font-size: 12px;
-  color: var(--rg-dim);
-  margin-top: 2px;
+  margin: 1px 0 0 24px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #8f8676;
 }
 .toast .t-detail b {
   font-family: var(--rg-font-mono);
   font-weight: 400;
-  color: var(--accent);
-}
-.toast .t-time {
-  font-family: var(--rg-font-mono);
-  font-size: 10.5px;
-  color: var(--rg-faint);
-  align-self: start;
+  color: #b7ad98;
 }
 .toast .t-timer {
   position: absolute;
   left: 0;
   bottom: 0;
-  height: 2px;
+  height: 1px;
   width: 100%;
-  background: var(--accent);
   transform-origin: left;
-  animation: rgTimer 6s linear forwards;
+  background: var(--accent);
+  opacity: 0.3;
+  animation: rgTimer 6s linear both;
 }
 @keyframes rgTimer {
   from { transform: scaleX(1); }
@@ -1152,33 +1152,189 @@ body {
   box-shadow: 0 0 22px rgba(201, 162, 78, 0.08);
 }
 
-/* legend keeps the family look */
+/* ---------- legend (Regalia v2 — L-key overlay) ---------- */
 #legend-panel {
-  background: var(--rg-glass);
-  border: 1px solid var(--rg-hairline);
+  position: fixed;
+  inset: 0;
+  transform: none;
+  width: auto;
+  max-height: none;
+  overflow-y: visible;
+  border-radius: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  z-index: 70;
   font-family: var(--rg-font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--rg-ivory);
+  background: rgba(3, 5, 7, 0.5);
+  border: none;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: lgFade 0.3s ease both;
 }
-
-/* Regalia toasts, interim size correction — the handoff cards were too
-   large over gameplay; tightened here until the Design v2 round */
-#toast-host,
-#toast-host[data-mode='frame'],
-#toast-host[data-mode='drive'] {
-  width: 288px;
-  gap: 8px;
+#legend-panel[hidden] {
+  display: none;
 }
-.toast {
-  grid-template-columns: 24px 1fr auto;
-  gap: 9px;
-  padding: 9px 11px 11px 13px;
-  border-radius: 12px;
+@keyframes lgFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.toast .t-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+.lg-card {
+  width: 420px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 24px 26px 26px;
+  border-radius: 20px;
+  background: rgba(11, 10, 9, 0.93);
+  backdrop-filter: blur(34px) saturate(1.12);
+  -webkit-backdrop-filter: blur(34px) saturate(1.12);
+  border: 1px solid rgba(201, 162, 78, 0.18);
+  box-shadow:
+    0 44px 100px -44px rgba(0, 0, 0, 0.92),
+    0 1px 0 rgba(201, 162, 78, 0.1) inset;
+  animation: lgRise 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes lgRise {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+.lg-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.lg-head h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--rg-ivory);
+}
+.lg-hint {
+  font-size: 11px;
+  color: #7c7466;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg-sec {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #c9a24e;
+}
+.lg-secrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.lg-cur {
+  font-family: var(--rg-font-mono);
   font-size: 12px;
+  color: #c3bba9;
+  white-space: nowrap;
 }
-.toast .t-title { font-size: 12px; }
-.toast .t-detail { font-size: 10.5px; margin-top: 1px; }
-.toast .t-time { font-size: 9px; }
+.lg-cur b {
+  color: #e3b968;
+  font-weight: 500;
+}
+.lg-scale {
+  position: relative;
+  height: 7px;
+  border-radius: 99px;
+  margin: 13px 0 16px;
+  background: linear-gradient(90deg, #5fb39a 0%, #c9a24e 26%, #e3a857 50%, #d0623e 74%, #b5341a 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3) inset;
+}
+.lg-marker {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  left: 0%;
+  width: 2px;
+  border-radius: 2px;
+  background: #f6f1e6;
+  box-shadow: 0 0 8px 1px rgba(246, 241, 230, 0.7);
+}
+.lg-tier {
+  display: grid;
+  grid-template-columns: 13px 128px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
+}
+.lg-tier.on {
+  background: rgba(201, 162, 78, 0.08);
+}
+.lg-sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+.lg-tn {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e6ddca;
+}
+.lg-rg {
+  font-family: var(--rg-font-mono);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 400;
+  color: #7c7466;
+  margin-left: 6px;
+}
+.lg-td {
+  font-size: 11.5px;
+  color: #9a9182;
+  text-align: right;
+}
+.lg-tier.on .lg-td {
+  color: #c3bba9;
+}
+.lg-divider {
+  height: 1px;
+  background: rgba(201, 162, 78, 0.12);
+  margin: 20px 0;
+}
+.lg-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 22px;
+  margin-top: 14px;
+}
+.lg-ctl {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.lg-keys {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.lg-key {
+  font-family: var(--rg-font-mono);
+  font-size: 10.5px;
+  color: #e6ddca;
+  background: rgba(230, 214, 180, 0.06);
+  border: 1px solid rgba(201, 162, 78, 0.24);
+  border-radius: 6px;
+  padding: 3px 7px;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.1;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+.lg-act {
+  font-size: 11.5px;
+  color: #c3bba9;
+  white-space: nowrap;
+}

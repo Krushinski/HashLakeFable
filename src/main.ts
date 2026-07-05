@@ -290,7 +290,7 @@ async function boot(): Promise<void> {
       }
     }
     if (e.key === 'd' || e.key === 'D') debug.toggle()
-    if (e.key === 'l' || e.key === 'L') legend.toggle()
+    if (e.key === 'l' || e.key === 'L') legend.toggle(weather.stormIndex)
     if (e.key === 'f' || e.key === 'F') {
       if (document.fullscreenElement) document.exitFullscreen()
       else document.documentElement.requestFullscreen()
@@ -402,7 +402,7 @@ async function boot(): Promise<void> {
       updatePill()
     },
     toggleDebug: () => debug.toggle(),
-    toggleLegend: () => legend.toggle(),
+    toggleLegend: () => legend.toggle(weather.stormIndex),
     isDriving: () => driveMode,
   })
 
