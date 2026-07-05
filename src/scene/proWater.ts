@@ -99,7 +99,10 @@ export class ProWater {
     p.sky = await SkySystem.create({
       renderer,
       camera,
-      quality: 'high',
+      // 'high' on both libs pinned the RTX 3050 at ~18 fps — and low fps
+      // is upstream of everything: solver stability margins, cloud
+      // reprojection swim, input feel. Medium buys the headroom back.
+      quality: 'medium',
       // mid-afternoon alpine light — high, bright sun
       timeOfDay: { time: 0.58 },
     })
@@ -114,7 +117,7 @@ export class ProWater {
     // the wake solver's stability limit — the field amplified its own
     // energy into jagged peaks no friction could damp (the "nightmare
     // physics" / hurricane-shake session).
-    p.water = await WaterSystem.create(renderer, scene, camera, 'high')
+    p.water = await WaterSystem.create(renderer, scene, camera, 'medium')
     p.water.loadPreset(getPresetParams('dusk'))
     p.water.updateCascadeConfig(0, CASCADES.waves)
     p.water.updateCascadeConfig(1, CASCADES.ripples)
@@ -167,9 +170,14 @@ export class ProWater {
     // laps inject energy faster than the field damps, so the basin
     // whips into permanent white peaks ("nightmare physics"). A lake
     // is stiffer and only foams on genuinely breaking crests.
-    p.water.wake.friction = 0.85
-    p.water.wake.foamStrength = 0.55
+    p.water.wake.friction = 1.4
+    p.water.wake.foamStrength = 0.4
     p.water.wake.foamBreakThreshold = 0.35
+
+    // Nobody dives in this game — and the underwater pass is what
+    // painted the teal band across the screen bottom whenever a camera
+    // dipped near the displaced surface ("chopped out" in C-angles).
+    p.water.underwater.enabled = false
 
     // Alpine water, not brown murk: dusk's absorption (~0.1/m) is so
     // clear our sand-colored lakebed shows through everywhere — water
@@ -199,14 +207,17 @@ export class ProWater {
       rotationSmoothing: 0.16,
       rotationInfluence: 0.75,
     })
+    // Injection depths QUARTERED from the ocean-ish first guesses: at
+    // lake scale even 0.4m of continuously-injected displacement reads
+    // as a churned mountain trail once the field integrates it.
     this.bowWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.5,
-      radius: 1.6,
+      depth: 0.12,
+      radius: 1.3,
       offset: new THREE.Vector3(0, 0, 2.3),
     })
     this.sternWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.7,
-      radius: 1.9,
+      depth: 0.18,
+      radius: 1.6,
       offset: new THREE.Vector3(0, 0, -2.5),
     })
     this.water.wake.foamPersistence = 0.94
@@ -223,12 +234,12 @@ export class ProWater {
     const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.55 + k * 0.75) * idle,
-      radius: 1.9 + k * 1.3,
+      depth: (0.18 + k * 0.22) * idle,
+      radius: 1.6 + k * 0.8,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: (0.4 + k * 0.4) * idle,
-      radius: 1.5 + k * 0.7,
+      depth: (0.12 + k * 0.12) * idle,
+      radius: 1.3 + k * 0.5,
     })
   }
 
@@ -267,11 +278,11 @@ export class ProWater {
 
   /** Advance both simulations. Water update is async (GPU readbacks). */
   async update(dt: number): Promise<void> {
-    // clamp to TWO fixed substeps max: more substeps per frame = more
-    // GPU sync points = lower fps = even more substeps (death spiral —
-    // measured: pinned at 1 fps with a 0.1s clamp). Below 30 fps the
-    // water simply runs a touch slow-motion instead.
-    dt = Math.min(dt, 2 / 60)
+    // clamp the sim step to 60Hz-sized: 33ms steps STILL let the wake
+    // field self-amplify at 18 fps (user's mountain-trail screenshots).
+    // Below 60 fps the water runs proportionally slow-motion — stable
+    // and calm beats realtime and exploding.
+    dt = Math.min(dt, 1 / 60)
     this.sky.update(dt)
     // keep the water's sun/light in step with Sky Pro's sun
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
