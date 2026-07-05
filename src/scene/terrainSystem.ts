@@ -29,7 +29,7 @@ import { bedHeight, shoreSdf } from './lakeMap'
  */
 
 const DOMAIN = 5120
-const CELLS = 448
+const CELLS = 528
 
 interface Ridge {
   x1: number
@@ -99,10 +99,13 @@ function mountainHeight(x: number, z: number): number {
     // sharp flank profile — steep near the crest, easing at the skirt
     const flank = Math.pow(Math.max(0, 1 - d / 2.6), 1.8)
 
-    // carve with ridged noise: strong crest articulation + rocky detail
+    // carve with ridged noise: strong crest articulation + rocky detail,
+    // plus a fine third octave for crag definition (§user hero pass 2)
     const macro = ridgedNoise(x * 0.0011, z * 0.0011, 913)
     const micro = ridgedNoise(x * 0.0048, z * 0.0048, 407)
-    const carved = crest * flank * (0.52 + 0.38 * macro + 0.22 * micro)
+    const crag = ridgedNoise(x * 0.011, z * 0.011, 1207)
+    const carved =
+      crest * flank * (0.47 + 0.38 * macro + 0.24 * micro + 0.12 * crag)
 
     h = Math.max(h, carved)
   }
@@ -124,6 +127,20 @@ export function terrainHeight(x: number, z: number): number {
     fbm2(x * 0.0022, z * 0.0022, { octaves: 4, seed: 77 }) *
     2.6 *
     Math.min(1, sdf / 90)
+
+  // rolling breaks — real land is never a smooth ramp; these folds are
+  // where shadows live (§user: ruggedness/mood pass)
+  h +=
+    fbm2(x * 0.008, z * 0.008, { octaves: 3, seed: 131 }) *
+    3.4 *
+    Math.min(1, sdf / 60)
+
+  // occasional rocky outcrop knolls that shoulder out of the meadow —
+  // their slopes flip the shader to granite automatically
+  const knoll = ridgedNoise(x * 0.004, z * 0.004, 555)
+  h +=
+    Math.max(0, knoll - 0.62) * 46 *
+    Math.min(1, Math.max(0, (sdf - 25) / 120))
 
   // Foothills climbing toward the north range.
   const north = Math.min(1, Math.max(0, (-z - 620) / 900))
@@ -158,6 +175,12 @@ const FAR_RIDGES: Ridge[] = [
   { x1: -900, z1: -3750, h1: 1120, x2: 1500, z2: -3500, h2: 880, r: 900 },
   { x1: 2300, z1: -2600, h1: 640, x2: 3600, z2: -1500, h2: 430, r: 760 },
   { x1: -3600, z1: -1300, h1: 540, x2: -2600, z2: -2300, h2: 730, r: 800 },
+  // supporting ranges ringing the world (§user) — the due south stays
+  // low and open so the basin still breathes
+  { x1: 2700, z1: -600, h1: 480, x2: 3500, z2: 800, h2: 620, r: 720 },
+  { x1: -3500, z1: 300, h1: 560, x2: -2700, z2: 1700, h2: 410, r: 700 },
+  { x1: 1900, z1: 2700, h1: 300, x2: 3300, z2: 1800, h2: 440, r: 640 },
+  { x1: -2400, z1: 2600, h1: 340, x2: -1300, z2: 3100, h2: 260, r: 600 },
 ]
 
 function farRangeHeight(x: number, z: number): number {
@@ -181,6 +204,26 @@ function farRangeHeight(x: number, z: number): number {
 
 export class FarRanges {
   constructor(scene: THREE.Scene) {
+    // valley mist bands — translucent haze strips at the range bases give
+    // the aerial-perspective depth of the webgpu fog reference
+    const mist = new THREE.MeshBasicMaterial({
+      color: 0xcfdce2,
+      transparent: true,
+      opacity: 0.07,
+      depthWrite: false,
+    })
+    for (const [z, y, h, op] of [
+      [-1480, 95, 130, 0.075],
+      [-1950, 150, 190, 0.06],
+      [-2500, 220, 260, 0.05],
+    ]) {
+      const m = mist.clone()
+      m.opacity = op
+      const band = new THREE.Mesh(new THREE.PlaneGeometry(8200, h), m)
+      band.position.set(0, y, z)
+      band.renderOrder = 12
+      scene.add(band)
+    }
     const geo = new THREE.PlaneGeometry(9000, 9000, 160, 160)
     geo.rotateX(-Math.PI / 2)
     const pos = geo.attributes.position as THREE.BufferAttribute
@@ -197,10 +240,20 @@ export class FarRanges {
       return positionLocal
     })()
     material.colorNode = Fn(() => {
-      const rock = mix(color(0x55524c), color(0x7d786f),
-        mx_noise_float(vec3(positionLocal.xz.mul(0.004), 3.3)).mul(0.5).add(0.5))
+      // granite strata: broad banding + finer fracture tone
+      const strata = mx_noise_float(
+        vec3(positionLocal.x.mul(0.0035), vH.mul(0.016), positionLocal.z.mul(0.0035)),
+      ).mul(0.5).add(0.5)
+      const fract = mx_noise_float(vec3(positionLocal.xz.mul(0.011), 8.1))
+        .mul(0.5).add(0.5)
+      const rock = mix(
+        mix(color(0x4e4b45), color(0x7d786f), strata),
+        color(0x8f897e),
+        fract.mul(0.3),
+      )
       const snow = color(0xe8edf0)
-      return mix(rock, snow, smoothstep(float(640), float(800), vH))
+      const snowJit = mx_noise_float(vec3(positionLocal.xz.mul(0.004), 5.5)).mul(90)
+      return mix(rock, snow, smoothstep(float(620), float(790), vH.add(snowJit)))
     })()
     const mesh = new THREE.Mesh(geo, material)
     scene.add(mesh)
@@ -284,31 +337,68 @@ export class TerrainSystem {
       )
 
       // meadow: lush near shore, drier + patchier with altitude
-      const grass = mix(
+      let grass = mix(
         mix(grassLush, grassDeep, patch.mul(0.5).add(0.5)),
         meadowDry,
         macro.mul(0.5).add(0.5).mul(0.55),
       )
+      // lakeside lush band — the rich waterline green from the serene
+      // reference frames
+      const lakeside = smoothstep(float(30), float(4), vShore)
+      grass = mix(grass, color(0x2e6b28), lakeside.mul(0.5))
       const upland = mix(
         grass,
         forestFloor,
         smoothstep(float(60), float(220), vHeight),
       )
 
-      // rock takes over on slopes and altitude; banded striations
+      // rock takes over on slopes and altitude; banded striations at two
+      // scales — broad strata + finer fracture detail
       const stria = mx_noise_float(
         vec3(worldXZ.x.mul(0.02), vHeight.mul(0.055), worldXZ.y.mul(0.02)),
       )
-      const rock = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
-
-      const slopeRock = smoothstep(float(0.35), float(0.62), vSlope)
-      const altRock = smoothstep(float(210), float(330), vHeight)
-      const rockMask = slopeRock.max(altRock)
-
-      // snow on high, flatter faces — selective caps, not icing
-      const snowMask = smoothstep(float(470), float(600), vHeight).mul(
-        float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)),
+      const fracture = mx_noise_float(
+        vec3(worldXZ.x.mul(0.11), vHeight.mul(0.16), worldXZ.y.mul(0.11)),
       )
+      const rockBase = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
+      const rock = mix(
+        rockBase,
+        mix(color(0x6b6257), color(0x9a938a), fracture.mul(0.5).add(0.5)),
+        0.35,
+      )
+      // scree fans collect on the mid slopes below the crags
+      const scree = color(0x7a7268)
+      const screeMask = smoothstep(float(0.24), float(0.36), vSlope)
+        .mul(float(1).sub(smoothstep(float(0.42), float(0.6), vSlope)))
+        .mul(smoothstep(float(160), float(280), vHeight))
+        .mul(patch.mul(0.5).add(0.5))
+
+      // granite claims the slopes earlier and lower — the hero range
+      // reads stone-first, green-second (§user: away from pure green)
+      const slopeRock = smoothstep(float(0.28), float(0.52), vSlope)
+      const altRock = smoothstep(float(150), float(255), vHeight)
+      const graniteVein = mx_noise_float(vec3(worldXZ.mul(0.0026), 31.7))
+        .mul(0.5).add(0.5)
+      const veinMask = smoothstep(float(0.58), float(0.78), graniteVein)
+        .mul(smoothstep(float(60), float(150), vHeight))
+      const rockMask = slopeRock.max(altRock).max(veinMask.mul(0.85))
+
+      // subalpine golden band where the meadow thins into rock
+      const subalpine = color(0x96914e)
+      const subalpMask = smoothstep(float(260), float(360), vHeight)
+        .mul(float(1).sub(smoothstep(float(360), float(470), vHeight)))
+        .mul(float(1).sub(slopeRock))
+        .mul(macro.mul(0.5).add(0.5))
+
+      // snow on high, flatter faces — the line broken by drift noise so
+      // it reads as fingers and gullies, never a contour line
+      const snowJitter = mx_noise_float(vec3(worldXZ.mul(0.006), 21.7))
+        .mul(70)
+      const snowMask = smoothstep(
+        float(455),
+        float(590),
+        vHeight.add(snowJitter),
+      ).mul(float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)))
 
       const beachToGrass = mix(
         beach,
@@ -319,7 +409,9 @@ export class TerrainSystem {
       )
       let ground = mix(bed, beachToGrass,
         smoothstep(float(-0.35), float(0.25), vHeight))
+      ground = mix(ground, subalpine, subalpMask.mul(0.6))
       ground = mix(ground, rock, rockMask)
+      ground = mix(ground, scree, screeMask)
       ground = mix(ground, snow, snowMask)
 
       return ground.mul(grain.mul(0.12).add(0.94))

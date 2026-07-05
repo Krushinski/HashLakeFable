@@ -30,22 +30,27 @@ interface Blob {
 
 /** Organic lake body = smooth union of overlapping rounded shapes. */
 const LAKE_BLOBS: Blob[] = [
-  { cx: 0, cz: 40, rx: 620, rz: 440 }, // main body
+  { cx: 0, cz: 40, rx: 640, rz: 460 }, // main body
   { cx: -140, cz: -430, rx: 260, rz: 240 }, // north bay toward the mountain gateway
   { cx: 560, cz: 190, rx: 250, rz: 200 }, // east cove
-  { cx: -580, cz: 110, rx: 190, rz: 170 }, // west dock inlet
+  { cx: -580, cz: 110, rx: 200, rz: 180 }, // west dock inlet
   { cx: 190, cz: 470, rx: 380, rz: 230 }, // south shallows reach
+  // island back-channel: keeps the water behind the island deep enough
+  // to thread at full speed (§user)
+  { cx: -430, cz: 360, rx: 200, rz: 150 },
 ]
 
 /** Landmark features that shape the lake bed. */
-export const ISLAND = { cx: -260, cz: 330, r: 90, crest: 2.4 }
+// island: cubic-falloff plateau (a peaked gaussian left it a 38 m
+// marshmallow) — landR is where the bed crosses the waterline
+export const ISLAND = { cx: -235, cz: 305, r: 155, crest: 3.6, landR: 74 }
 export const SANDBAR = {
   cx: 230,
   cz: 360,
   rx: 160,
   rz: 60,
   rot: -0.35,
-  crest: 0.35,
+  crest: 0.9,
 }
 
 function blobSdf(x: number, z: number, b: Blob): number {
@@ -65,6 +70,8 @@ function smoothMin(a: number, b: number, k: number): number {
 /**
  * Signed distance to the lake shoreline in meters.
  * Negative inside the water, positive on land.
+ * The island and the exposed sandbar crest are LAND here too — one
+ * source of truth for water trim, terrain color, foam, minimap, boat.
  */
 export function shoreSdf(x: number, z: number): number {
   let d = Infinity
@@ -75,7 +82,26 @@ export function shoreSdf(x: number, z: number): number {
   const wobble =
     fbm2(x * 0.0016, z * 0.0016, { octaves: 3, seed: 7 }) * 46 +
     fbm2(x * 0.008, z * 0.008, { octaves: 2, seed: 23 }) * 9
-  return d + wobble
+  let s = d + wobble
+
+  // island landmass (own gentle wobble — the lake-scale one would
+  // swallow a 74 m shoreline whole)
+  const di = Math.hypot(x - ISLAND.cx, z - ISLAND.cz)
+  const islandLand =
+    ISLAND.landR - di + fbm2(x * 0.01, z * 0.01, { octaves: 2, seed: 71 }) * 8
+  s = Math.max(s, islandLand)
+
+  // exposed sandbar crest — a slim ellipse of dry sand
+  const c = Math.cos(SANDBAR.rot)
+  const sn = Math.sin(SANDBAR.rot)
+  const dx = x - SANDBAR.cx
+  const dz = z - SANDBAR.cz
+  const lx = (dx * c - dz * sn) / SANDBAR.rx
+  const lz = (dx * sn + dz * c) / SANDBAR.rz
+  const barLand = (0.125 - Math.hypot(lx, lz)) * 70
+  s = Math.max(s, barLand)
+
+  return s
 }
 
 function gaussianBump(
@@ -110,9 +136,22 @@ export function bedHeight(x: number, z: number): number {
   // Gentle bed relief so the shallows aren't a perfect ramp.
   bed += fbm2(x * 0.003, z * 0.003, { octaves: 3, seed: 41 }) * 1.6 * t
 
-  // Island rises through the surface; sandbar grazes it.
-  const island = gaussianBump(x, z, ISLAND.cx, ISLAND.cz, ISLAND.r, ISLAND.r)
-  bed = Math.max(bed, -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * island)
+  // Island: cubic-falloff plateau — flat-topped, steep sides, wide
+  // beach shelf; relief noise breaks the marshmallow dome
+  const du = Math.hypot(x - ISLAND.cx, z - ISLAND.cz) / ISLAND.r
+  const islandG = Math.exp(-Math.pow(du, 3) * 1.2)
+  bed = Math.max(
+    bed,
+    -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * islandG,
+  )
+  if (islandG > 0.5) {
+    // strong dune-and-hollow relief — the dome must never read as a
+    // marshmallow (§user, twice)
+    bed += (islandG - 0.5) * 2 *
+      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 3.4
+    bed += (islandG - 0.5) * 2 *
+      Math.max(0, fbm2(x * 0.045, z * 0.045, { octaves: 2, seed: 17 })) * 1.6
+  }
 
   const bar = gaussianBump(
     x,

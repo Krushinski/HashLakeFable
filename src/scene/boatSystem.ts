@@ -3,7 +3,7 @@ import { Fn, positionLocal, sin, uniform } from 'three/tsl'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import type { WaveField } from './waveField'
-import { shoreSdf } from './lakeMap'
+import { shoreSdf, waterDepth } from './lakeMap'
 
 /**
  * The hero runabout + Drive Mode physics (§6.2).
@@ -33,6 +33,30 @@ export interface DriveInput {
   anchor: boolean
 }
 
+/** Deep-red flag with a white bitcoin mark, drawn once on a canvas. */
+function makeFlagTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const g = c.getContext('2d')!
+  g.fillStyle = '#8a1016'
+  g.fillRect(0, 0, 256, 128)
+  g.fillStyle = '#f4efe8'
+  g.font = '700 88px Georgia, "Times New Roman", serif'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillText('B', 128, 68)
+  // the ₿ bars above and below the stem
+  g.fillRect(109, 6, 8, 20)
+  g.fillRect(127, 6, 8, 20)
+  g.fillRect(109, 102, 8, 20)
+  g.fillRect(127, 102, 8, 20)
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  return tex
+}
+
 export interface DriveCameraPreset {
   name: string
   back: number
@@ -45,10 +69,16 @@ export const DRIVE_PRESETS: DriveCameraPreset[] = [
   { name: 'Chase', back: 12.5, up: 4.4, lookAhead: 10, lookUp: 1.2 },
   { name: 'Low Chase', back: 9, up: 2.1, lookAhead: 14, lookUp: 1.6 },
   { name: 'High Map', back: 24, up: 30, lookAhead: 4, lookUp: 0 },
-  // OJ: helicopter tracking shot — boat low in frame, long forward view
-  { name: 'OJ Mode', back: 30, up: 17, lookAhead: 68, lookUp: 5 },
-  // Vice: full aerial — boat at the bottom edge, the WHOLE world in frame
-  { name: 'Vice City', back: 16, up: 46, lookAhead: 240, lookUp: 12 },
+  // Sky Chase: a FORWARD-LOOKING High Map — top-down altitude, view
+  // shifted ahead so you can read the water coming at you (§user v2:
+  // was too close to OJ)
+  { name: 'Sky Chase', back: 20, up: 38, lookAhead: 20, lookUp: 0 },
+  // OJ: helicopter tracking shot — boat ~86% down frame, horizon high
+  // (framing solved against the Codex reference screenshots)
+  { name: 'OJ Mode', back: 44, up: 26, lookAhead: 28, lookUp: 8 },
+  // Vice: full aerial — boat small at the bottom, the world in frame
+  // (old lookAhead 240 pitched the view so far out the boat left the FOV)
+  { name: 'Vice City', back: 88, up: 54, lookAhead: 150, lookUp: 6 },
 ]
 
 export class BoatSystem {
@@ -102,6 +132,9 @@ export class BoatSystem {
       if (mesh.name.includes('Flag') || o.parent?.name.includes('Flag')) {
         this.riggedFlag(mesh)
       }
+      if (mesh.name.includes('Scarf')) {
+        this.riggedScarf(mesh)
+      }
     })
 
     // face -z when heading = π (glTF -z forward after y-up export; our hull
@@ -116,6 +149,9 @@ export class BoatSystem {
   /** Flag cloth sway — distance-weighted sine ripple, wind/speed driven. */
   private riggedFlag(mesh: THREE.Mesh): void {
     const mat = mesh.material as THREE.MeshStandardNodeMaterial
+    // white ₿ on the deep red field (canvas texture, zero assets)
+    mat.map = makeFlagTexture()
+    mat.color.set(0xffffff)
     const t = this.waveField.uTime
     const wind = this.uFlagWind
     mat.positionNode = Fn(() => {
@@ -126,6 +162,24 @@ export class BoatSystem {
       const amp = along.mul(0.16).mul(wind)
       p.z.addAssign(sin(phase).mul(amp))
       p.y.addAssign(sin(phase.mul(0.7)).mul(amp).mul(0.3))
+      return p
+    })()
+    mat.side = THREE.DoubleSide
+  }
+
+  /** Satoshi's scarf tail — streams aft, driven by the same wind uniform. */
+  private riggedScarf(mesh: THREE.Mesh): void {
+    const mat = mesh.material as THREE.MeshStandardNodeMaterial
+    const t = this.waveField.uTime
+    const wind = this.uFlagWind
+    mat.positionNode = Fn(() => {
+      const p = positionLocal.toVar()
+      // tail anchored at the neck (authored from x≈1.0, trailing +x)
+      const along = positionLocal.x.sub(1.0).max(0)
+      const phase = along.mul(7).sub(t.mul(6))
+      const amp = along.mul(0.13).mul(wind)
+      p.z.addAssign(sin(phase).mul(amp))
+      p.y.addAssign(sin(phase.mul(0.8).add(1.2)).mul(amp).mul(0.45))
       return p
     })()
     mat.side = THREE.DoubleSide
@@ -237,6 +291,29 @@ export class BoatSystem {
       nx -= (gx / glen) * (hereSdf + 5) * 0.5
       nz -= (gz / glen) * (hereSdf + 5) * 0.5
       this.speed *= Math.exp(-2.5 * dt)
+    }
+
+    // ------------------------------------------- shallow-water grounding
+    // The island and sandbar are bed bumps invisible to shoreSdf — the
+    // hull runs aground on DEPTH, same field the water renders as sand,
+    // so the boat stops exactly where the shallows visually begin.
+    const DRAFT = 0.7
+    const depthAhead = waterDepth(nx + dirX * look, nz + dirZ * look)
+    if (depthAhead < DRAFT + 1.8) {
+      const closeness = 1 - Math.max(0, depthAhead - DRAFT) / 1.8
+      this.speed *= Math.exp(-closeness * 3.6 * dt)
+    }
+    const depthHere = waterDepth(nx, nz)
+    if (depthHere < DRAFT + 0.15) {
+      // push toward deeper water along the depth gradient
+      const e = 2.5
+      const gx = waterDepth(nx + e, nz) - waterDepth(nx - e, nz)
+      const gz = waterDepth(nx, nz + e) - waterDepth(nx, nz - e)
+      const glen = Math.hypot(gx, gz) || 1
+      const shove = Math.min(2.2, (DRAFT + 0.15 - depthHere) * 3)
+      nx += (gx / glen) * shove
+      nz += (gz / glen) * shove
+      this.speed *= Math.exp(-3.2 * dt)
     }
     this.x = nx
     this.z = nz

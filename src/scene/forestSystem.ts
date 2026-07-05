@@ -116,7 +116,7 @@ export class ForestSystem {
     tryPlace(640, 480, 4, 400, true)
 
     // scattered ring around the whole lake
-    for (let i = 0; i < 2600 && slots.length < 240; i++) {
+    for (let i = 0; i < 3400 && slots.length < 310; i++) {
       const ang = rand() * Math.PI * 2
       const rad = 500 + rand() * 700
       tryPlace(Math.sin(ang) * rad, Math.cos(ang) * rad * 0.92 + 40, 10, 320)
@@ -162,9 +162,77 @@ export class ForestSystem {
       this.group.add(inst)
     }
 
+    // ---- far-field impostor band: crossed alpha cards climbing the
+    // foothills — 4 triangles per tree, so the upslope forest reads as
+    // forest instead of green velvet (brief §3.5.3 far ring) ----
+    const impostorTex = new THREE.TextureLoader().load(
+      `${base}assets/textures/hl-spruce-impostor.png`,
+    )
+    impostorTex.colorSpace = THREE.SRGBColorSpace
+    const impMat = new THREE.MeshStandardMaterial({
+      map: impostorTex,
+      alphaTest: 0.28,
+      side: THREE.DoubleSide,
+      roughness: 1,
+      metalness: 0,
+    })
+    const IW = 9
+    const IH = 16.5
+    const impGeo = new THREE.BufferGeometry()
+    impGeo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(
+        [
+          -IW / 2, 0, 0, IW / 2, 0, 0, IW / 2, IH, 0, -IW / 2, IH, 0,
+          0, 0, -IW / 2, 0, 0, IW / 2, 0, IH, IW / 2, 0, IH, -IW / 2,
+        ],
+        3,
+      ),
+    )
+    impGeo.setAttribute(
+      'uv',
+      new THREE.Float32BufferAttribute(
+        [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1],
+        2,
+      ),
+    )
+    impGeo.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7])
+    impGeo.computeVertexNormals()
+
+    interface ImpSlot { x: number; z: number; scale: number; rot: number }
+    const impSlots: ImpSlot[] = []
+    for (let i = 0; i < 24000 && impSlots.length < 4600; i++) {
+      const ang = rand() * Math.PI * 2
+      const rad = 640 + rand() * 1500
+      const x = Math.sin(ang) * rad
+      const z = Math.cos(ang) * rad * 0.92 + 40
+      const s = shoreSdf(x, z)
+      if (s < 50 || s > 1200) continue
+      const h = terrainHeight(x, z)
+      if (h > 140) continue // hug the lake bowl — high trees read as ants
+      let ok = true
+      for (const p of impSlots) {
+        if ((p.x - x) ** 2 + (p.z - z) ** 2 < 44) { ok = false; break }
+      }
+      if (!ok) continue
+      impSlots.push({ x, z, scale: 0.65 + rand() * 0.6, rot: rand() * Math.PI })
+    }
+    const impInst = new THREE.InstancedMesh(impGeo, impMat, impSlots.length)
+    impSlots.forEach((s, i) => {
+      q.setFromAxisAngle(up, s.rot)
+      sc.setScalar(s.scale)
+      pos.set(s.x, terrainHeight(s.x, s.z) - 0.3, s.z)
+      m4.compose(pos, q, sc)
+      impInst.setMatrixAt(i, m4)
+    })
+    impInst.instanceMatrix.needsUpdate = true
+    impInst.frustumCulled = false
+    this.group.add(impInst)
+
     this.ready = true
     console.info(
-      `forest: ${heroSlots.length} hero + ${farSlots.length} instanced spruces, ` +
+      `forest: ${heroSlots.length} hero + ${farSlots.length} instanced + ` +
+        `${impSlots.length} impostor spruces, ` +
         `${lod0.prims.length}+${lod1.prims.length} prims`,
     )
   }

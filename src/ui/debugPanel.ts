@@ -20,6 +20,8 @@ export interface DebugTelemetry {
 
 export class DebugPanel {
   private el: HTMLDivElement
+  private body: HTMLDivElement
+  private mapDock: HTMLDivElement
   private visible = false
   private timer: number | null = null
 
@@ -31,6 +33,14 @@ export class DebugPanel {
     this.el = document.createElement('div')
     this.el.id = 'debug-panel'
     this.el.hidden = true
+    // stable two-part layout: re-rendered body + persistent map dock, so
+    // the 2 Hz innerHTML repaint never destroys the minimap canvas
+    this.body = document.createElement('div')
+    this.mapDock = document.createElement('div')
+    this.mapDock.className = 'dbg-map'
+    this.mapDock.innerHTML = '<h4>lake map</h4>'
+    this.el.appendChild(this.body)
+    this.el.appendChild(this.mapDock)
     document.body.appendChild(this.el)
     this.el.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('button')
@@ -47,6 +57,11 @@ export class DebugPanel {
         bus.emit('whale', { btc, txid: 'manual-test' })
       }
     })
+  }
+
+  /** Dock the minimap canvas at the bottom of the panel (§user: not on the main page). */
+  attachMinimap(canvas: HTMLCanvasElement): void {
+    this.mapDock.appendChild(canvas)
   }
 
   toggle(): boolean {
@@ -83,7 +98,7 @@ export class DebugPanel {
       return `<div class="dbg-feed"><span class="dot ${f.status}"></span><span>${name}</span><i>${f.detail ?? f.status}</i><b>${age}</b></div>`
     }
 
-    this.el.innerHTML = `
+    this.body.innerHTML = `
       <header>Hashlake — Debug <i>${t.fps.toFixed(0)} fps · ${t.rendererPath}</i></header>
       <div class="dbg-tiles">
         ${tile('Price', s.price ? '$' + s.price.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—')}

@@ -184,7 +184,7 @@ export class WaterSystem {
       color(0x25321f), // deep olive bed
       smoothstep(float(0), float(7.5), vDepth),
     )
-    const deepScatter = color(0x07333c)
+    const deepScatter = color(0x093a41)
     const body = deepScatter
       .mul(float(1).sub(transmit.g))
       .add(bedTint.mul(transmit).mul(0.92))
@@ -212,8 +212,11 @@ export class WaterSystem {
     const NdotH = n.dot(H).max(0)
     const sunCol = sky.uSunColor
     // Clamped to tame HDR fireflies; softened so the sun path glows
-    // rather than blinds at grazing drive angles.
+    // rather than blinds at grazing drive angles. The razor-thin sparkle
+    // lobe rides the detail normals — bloom turns it into glitter on the
+    // wave facets inside the sun path.
     const glint = pow(NdotH, 360).mul(2.0).min(1.5).add(pow(NdotH, 48).mul(0.12))
+    const sparkle = pow(NdotH, 1600).mul(3.2).min(2.2).mul(detailFade)
 
     // ------------------------------------------------------------- foam
     const foamUv = worldXZ.mul(0.06).add(vec2(t.mul(0.02), t.mul(0.014)))
@@ -231,15 +234,24 @@ export class WaterSystem {
       float(0.68),
       foldNorm.add(foamSample.g.sub(0.5).mul(0.3)),
     )
+    // shoreline trim: two offset lap bands + lacy filaments — the water's
+    // edge reads as living surf working the sand, not a gradient
     const lap = vDepth
       .mul(5.2)
       .sub(t.mul(1.35))
       .sin()
       .mul(0.5)
       .add(0.5)
-    const shoreFoam = smoothstep(float(1.5), float(0.18), vDepth)
-      .mul(lap.mul(0.55).add(0.45))
-      .mul(foamSample.r.mul(0.75).add(0.25))
+    const lap2 = vDepth
+      .mul(9.5)
+      .sub(t.mul(0.9))
+      .add(foamSample.g.mul(2.4))
+      .sin()
+      .mul(0.5)
+      .add(0.5)
+    const shoreFoam = smoothstep(float(2.2), float(0.16), vDepth)
+      .mul(lap.mul(0.45).add(lap2.mul(0.3)).add(0.35))
+      .mul(foamSample.r.mul(0.95).add(0.18))
     const ambientFoam = smoothstep(float(0.62), float(0.95), foamBig)
       .mul(foamSample.r)
       .mul(0.16)
@@ -255,7 +267,7 @@ export class WaterSystem {
     // ------------------------------------------------------------ compose
     const reflectAmount = fresnel.mul(float(1).sub(foamMask.mul(0.9)))
     let col = mix(body, reflectionRGB, reflectAmount)
-      .add(sunCol.mul(glint).mul(float(1).sub(foamMask)))
+      .add(sunCol.mul(glint.add(sparkle)).mul(float(1).sub(foamMask)))
     col = mix(col, foamColor, foamMask)
 
     material.colorNode = col.min(5)

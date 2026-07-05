@@ -22,15 +22,21 @@ export class BitcoinPill {
     const price = s.price
       ? `$${s.price.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
       : '—'
-    const chg = s.price ? ` ${s.chg24h >= 0 ? '+' : ''}${s.chg24h.toFixed(2)}%` : ''
-    const fee = s.fastestFee ? ` · ${s.fastestFee} sat/vB` : ''
-    const block = s.blockHeight ? ` · #${s.blockHeight.toLocaleString('en-US')}` : ''
-    this.text.textContent = `${price}${chg}${fee}${block}`
+    const chgClass = s.chg24h >= 0 ? 'pos' : 'neg'
+    const chg = s.price
+      ? `<span class="seg-chg ${chgClass}"> ${s.chg24h >= 0 ? '+' : ''}${s.chg24h.toFixed(2)}%</span>`
+      : ''
+    const fee = s.fastestFee
+      ? `<span class="seg-fee"> · ${s.fastestFee} sat/vB</span>`
+      : ''
+    const block = s.blockHeight
+      ? `<span class="seg-block"> · #${s.blockHeight.toLocaleString('en-US')}</span>`
+      : ''
+    this.text.innerHTML = `${price}${chg}${fee}${block}`
 
     const stale = s.staleness
     this.dot.className =
       'pill-dot ' + (stale > 0.6 ? 'red' : stale > 0.15 ? 'yellow' : 'green')
-    const chgClass = s.chg24h >= 0 ? 'pos' : 'neg'
     this.el.dataset.chg = chgClass
   }
 }
