@@ -107,15 +107,14 @@ export class ProWater {
     await p.sky.applyPreset(SKY_PRESETS.partlyCloudy)
 
     console.log('[boot] water:create')
-    // deterministic = FIXED 1/60 substeps. Without it, one host frame =
-    // one sim step at raw dt: at 14-20 fps that's a 50-70ms step, past
-    // the wake solver's stability limit — the field EXPLODES into
-    // jagged peaks that no amount of friction can damp (the "nightmare
+    // NOTE: deterministic fixed-substep mode measured 1 fps here (its
+    // per-substep sync points serialize the GPU) — stability comes from
+    // the dt clamp in update() instead: one sim step per frame, never
+    // fed more than 33ms. Uncapped 50-70ms steps at low fps blew past
+    // the wake solver's stability limit — the field amplified its own
+    // energy into jagged peaks no friction could damp (the "nightmare
     // physics" / hurricane-shake session).
-    p.water = await WaterSystem.create(renderer, scene, camera, 'high', {
-      deterministic: true,
-      stepSize: 1 / 60,
-    })
+    p.water = await WaterSystem.create(renderer, scene, camera, 'high')
     p.water.loadPreset(getPresetParams('dusk'))
     p.water.updateCascadeConfig(0, CASCADES.waves)
     p.water.updateCascadeConfig(1, CASCADES.ripples)
