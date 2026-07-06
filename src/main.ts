@@ -1,7 +1,8 @@
 import './styles.css'
 import * as THREE from 'three/webgpu'
-import { pass } from 'three/tsl'
+import { pass, renderOutput } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js'
 import { phasePillText } from './buildInfo'
 import { SkySystem } from './scene/skySystem'
 import { WaveField } from './scene/waveField'
@@ -115,7 +116,7 @@ async function boot(): Promise<void> {
   const waveField = new WaveField(20)
   const sky = USE_PRO ? null : new SkySystem(renderer, scene)
   const water = USE_PRO ? null : new WaterSystem(scene, waveField, sky!)
-  new TerrainSystem(scene)
+  const terrain = new TerrainSystem(scene)
   const forest = new ForestSystem(scene)
   forest.load().catch((err) => console.error('forest load failed:', err))
   const clouds = USE_PRO ? null : new CloudSystem(scene)
@@ -148,6 +149,15 @@ async function boot(): Promise<void> {
   // Water Pro + Sky Pro — created after the camera exists; the boat
   // registers with buoyancy/wake once its GLB is in
   const pro = USE_PRO ? await ProWater.create(renderer, scene, camera) : null
+  // weave Water Pro's animated caustics into the terrain's underwater
+  // bed shader — before the first frame so compileAsync sees the final
+  // node graph (its own procedural floor stays hidden; our bed IS the
+  // floor)
+  // ?nocaustics for the fps A/B — the pattern evaluates on every terrain
+  // fragment (the depth mask only hides it visually)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (pro && !new URLSearchParams(location.search).has('nocaustics'))
+    terrain.injectWaterNodes((pro.water.floor as any).caustics)
   boat
     .load()
     .then(() => pro?.attachBoat(boat))
@@ -205,13 +215,20 @@ async function boot(): Promise<void> {
   const scenePassColor = scenePass.getTextureNode('output')
   if (pro) {
     // Water Pro's post stack (atmospheric fog, underwater, sun shafts)
-    // wraps the scene, then our bloom rides on top
+    // wraps the scene, then our bloom rides on top. The PostProcessing
+    // chain renders through non-MSAA intermediates, so hull/mast edges
+    // alias raw and bloom amplifies the crawl into a fuzzy halo around
+    // the hero boat (§user) — FXAA on the FINAL LDR output (after tone
+    // mapping, hence outputColorTransform=false + manual renderOutput)
+    // is the cheap cure.
     const waterOut = pro.water.postProcessing.buildNode(
       scenePass,
       scenePassColor,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) as any
-    post.outputNode = waterOut.add(bloom(waterOut, 0.09, 0.3, 1.45))
+    const withBloom = waterOut.add(bloom(waterOut, 0.09, 0.3, 1.45))
+    post.outputColorTransform = false
+    post.outputNode = fxaa(renderOutput(withBloom))
   } else {
     post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.09, 0.3, 1.45))
   }

@@ -136,17 +136,21 @@ export function terrainHeight(x: number, z: number): number {
   const shelf = Math.min(1, sdf / 420)
   let h = 0.25 + 4.2 * Math.pow(shelf, 1.35)
 
+  // BEACH APRON (beauty pass): the first ~24 m of shore stay a flat,
+  // legible sand walk — the relief noise below used to add ±2.5 m right
+  // at the waterline, shredding the beach line into jagged nibbles. It
+  // ramps in beyond the apron instead.
   h +=
     fbm2(x * 0.0022, z * 0.0022, { octaves: 4, seed: 77 }) *
     2.6 *
-    Math.min(1, sdf / 90)
+    Math.min(1, Math.max(0, (sdf - 24) / 90))
 
   // rolling breaks — real land is never a smooth ramp; these folds are
   // where shadows live (§user: ruggedness/mood pass)
   h +=
     fbm2(x * 0.008, z * 0.008, { octaves: 3, seed: 131 }) *
     3.4 *
-    Math.min(1, sdf / 60)
+    Math.min(1, Math.max(0, (sdf - 24) / 60))
 
   // occasional rocky outcrop knolls that shoulder out of the meadow —
   // their slopes flip the shader to granite automatically
@@ -273,8 +277,15 @@ export class FarRanges {
   }
 }
 
+/** Minimal surface of Water Pro's Caustics we consume (TSL node factory). */
+interface CausticsLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  buildPatternAtWorldPos(worldX: any, worldZ: any): any
+}
+
 export class TerrainSystem {
   readonly mesh: THREE.Mesh
+  private readonly material: THREE.MeshStandardNodeMaterial
 
   constructor(scene: THREE.Scene) {
     const geo = new THREE.PlaneGeometry(DOMAIN, DOMAIN, CELLS, CELLS)
@@ -299,10 +310,29 @@ export class TerrainSystem {
     }
     geo.setAttribute('slope', new THREE.BufferAttribute(slopes, 1))
 
-    const material = new THREE.MeshStandardNodeMaterial()
-    material.roughness = 0.95
-    material.metalness = 0
+    this.material = new THREE.MeshStandardNodeMaterial()
+    this.material.roughness = 0.95
+    this.material.metalness = 0
+    this.buildGround(null)
 
+    this.mesh = new THREE.Mesh(geo, this.material)
+    this.mesh.receiveShadow = true
+    scene.add(this.mesh)
+  }
+
+  /**
+   * Re-build the ground shader with Water Pro's animated caustics node
+   * woven into the underwater bed. Called once after WaterSystem exists
+   * (and before the first frame — compileAsync runs after boot wiring),
+   * so land and water share the same living light.
+   */
+  injectWaterNodes(caustics: CausticsLike): void {
+    this.buildGround(caustics)
+    this.material.needsUpdate = true
+  }
+
+  private buildGround(caustics: CausticsLike | null): void {
+    const material = this.material
     const vShore = varying(float(0), 'vShoreDist')
     const vHeight = varying(float(0), 'vTerrainHeight')
     const vSlope = varying(float(0), 'vSlope')
@@ -314,6 +344,21 @@ export class TerrainSystem {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vSlope.assign(float(attribute('slope', 'float') as any))
       return positionLocal
+    })()
+
+    // wet-sand waterline: the band the water actually licks — darker,
+    // saturated, and GLOSSY (roughness drop is what sells "wet")
+    material.roughnessNode = Fn(() => {
+      const depthM = vHeight.negate()
+      const wet = smoothstep(float(-0.12), float(0.08), vHeight).mul(
+        float(1).sub(smoothstep(float(0.25), float(0.7), vHeight)),
+      )
+      const base = mix(
+        float(0.95),
+        float(0.8),
+        smoothstep(float(0.1), float(1.5), depthM),
+      )
+      return mix(base, float(0.38), wet)
     })()
 
     material.colorNode = Fn(() => {
@@ -335,19 +380,49 @@ export class TerrainSystem {
       const rockDark = color(0x4f4a42)
       const snow = color(0xeef2f4)
 
-      // lakebed
-      const bed = mix(
-        bedSand,
+      // depth below the waterline in meters (positive underwater) — the
+      // masks below all read in real meters of water column
+      const depthM = vHeight.negate()
+
+      // lakebed — now honestly visible through refraction, so it gets
+      // real structure: current-combed sand ripples in the shallows,
+      // silt pooling in the deeps
+      const rippleWarp = mx_noise_float(vec3(worldXZ.mul(0.02), 4.4)).mul(6)
+      const ripples = mx_noise_float(
+        vec3(worldXZ.x.mul(0.33).add(rippleWarp), worldXZ.y.mul(0.08), 9.2),
+      )
+      const rippleMask = smoothstep(float(0.15), float(0.9), depthM).mul(
+        float(1).sub(smoothstep(float(4.5), float(9), depthM)),
+      )
+      const silt = mx_noise_float(vec3(worldXZ.mul(0.013), 17.3))
+        .mul(0.5)
+        .add(0.5)
+      const siltMask = smoothstep(float(3), float(9), depthM)
+        .mul(silt)
+        .mul(0.5)
+
+      // submerged sand cools toward olive within the first couple of
+      // meters — the warm dry-sand tan straight down through half a
+      // meter of water read as RED at nadir (§user). Dry sand above the
+      // line keeps its warmth.
+      const bedCool = color(0x8a8570)
+      let bed = mix(
+        mix(bedSand, bedCool, smoothstep(float(0.05), float(0.9), depthM)),
         bedDeep,
         smoothstep(float(-2), float(-9), vHeight),
       )
+      bed = bed.mul(ripples.mul(0.16).mul(rippleMask).add(1))
+      bed = mix(bed, color(0x24331f), siltMask)
 
-      // beach band — narrow, pocketed by noise so it isn't a uniform rim
+      // beach band — narrow, pocketed by noise so it isn't a uniform rim.
+      // Dry sand arrives by ~0.45 m so low features (the 0.9 m sandbar
+      // crest) actually READ as dry sand instead of flat damp mud; extra
+      // grain keeps the flats from going airbrush-smooth.
       const beach = mix(
         dampSand,
         drySand,
-        smoothstep(float(0.12), float(0.9), vHeight),
-      )
+        smoothstep(float(0.1), float(0.45), vHeight),
+      ).mul(grain.mul(0.1).add(0.95))
 
       // meadow: lush near shore, drier + patchier with altitude
       let grass = mix(
@@ -422,16 +497,39 @@ export class TerrainSystem {
       )
       let ground = mix(bed, beachToGrass,
         smoothstep(float(-0.35), float(0.25), vHeight))
+
+      // wet-sand waterline band — recently-licked sand just above the
+      // water, darker and saturated, pocketed by grain so it never reads
+      // as a painted contour ring (pairs with the roughness drop above)
+      const wetSand = color(0x74654c)
+      const wetMask = smoothstep(float(-0.12), float(0.1), vHeight)
+        .mul(float(1).sub(smoothstep(float(0.22), float(0.6), vHeight)))
+        .mul(grain.mul(0.18).add(0.82))
+      ground = mix(ground, wetSand, wetMask.mul(0.85))
+
       ground = mix(ground, subalpine, subalpMask.mul(0.6))
       ground = mix(ground, rock, rockMask)
       ground = mix(ground, scree, screeMask)
       ground = mix(ground, snow, snowMask)
 
-      return ground.mul(grain.mul(0.12).add(0.94))
-    })()
+      ground = ground.mul(grain.mul(0.12).add(0.94))
 
-    this.mesh = new THREE.Mesh(geo, material)
-    this.mesh.receiveShadow = true
-    scene.add(this.mesh)
+      // Water Pro's animated caustics, alive on OUR bed: the pattern node
+      // carries intensity/dispersion/wave-sync from the lib; we gate it
+      // with our own column-depth mask — blooming in the first meter,
+      // gone by ~13 m where the light no longer reaches
+      if (caustics) {
+        const pattern = caustics.buildPatternAtWorldPos(
+          positionLocal.x,
+          positionLocal.z,
+        )
+        const caustMask = smoothstep(float(0.12), float(0.7), depthM).mul(
+          float(1).sub(smoothstep(float(6), float(13), depthM)),
+        )
+        ground = ground.add(pattern.mul(caustMask))
+      }
+
+      return ground
+    })()
   }
 }

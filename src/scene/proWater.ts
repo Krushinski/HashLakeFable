@@ -190,13 +190,22 @@ export class ProWater {
     })
     p.water.setSky(p.wpSky)
 
-    // our real terrain is the lake bed — hide the procedural ocean floor
+    // our real terrain is the lake bed — hide the procedural ocean floor.
+    // Its Caustics instance stays alive (wave-buffer-wired at create) and
+    // main.ts weaves its pattern node into OUR terrain shader; tune the
+    // pattern for a lake here: tighter cells than the 65 m ocean tile,
+    // a touch brighter since our shallows are where the eye lives.
     p.water.floor.setVisible(false)
+    p.water.floor.caustics.scale = 34
+    p.water.floor.caustics.intensity = 1.0
+    p.water.floor.caustics.waveDistortion = 0.28
 
     // the dusk preset ships warm-amber lights that brown the alpine
-    // meadows — neutralize toward clean daylight
-    p.water.lighting.sunLight.color.set(0xfff4e2)
-    p.water.lighting.sunLight.intensity = 3.4
+    // meadows — neutralize toward clean daylight. Whiter + slightly
+    // softer than the fork tune: the old warmth read as oversaturated
+    // wax on the hero hull up close (§user, last-day pass).
+    p.water.lighting.sunLight.color.set(0xfff8ee)
+    p.water.lighting.sunLight.intensity = 3.1
     p.water.lighting.hemisphereLight.color.set(0xbdd5e4)
     p.water.lighting.hemisphereLight.groundColor.set(0x4d5a44)
     p.water.lighting.hemisphereLight.intensity = 0.85
@@ -314,6 +323,11 @@ export class ProWater {
     // SSR ON under ?nossr — every past ?nossr A/B measured nothing. The
     // flag must actively disable.
     p.water.ssr.enabled = !flags.has('nossr')
+    // dusk ships SSR strength 0.9 — at near-grazing chase angles that
+    // smears a dark screen-space ghost of the hull sideways across the
+    // water ("reflection that shouldn't be there", §user). Half strength
+    // keeps the near-field mirror without the elongated phantom.
+    p.water.ssr.strength = 0.45
 
     // ?nofog probe for the tan bottom-of-screen haze band (set at
     // create-time — post-build toggles black-screen)
@@ -338,7 +352,9 @@ export class ProWater {
     // transmission + deep alpine body.
     p.water.color.absorptionColor = '#8a4a26'
     p.water.color.transmissionColor = '#2e8574'
-    p.water.color.waterColor = '#0d434e'
+    // deep-body hue: a notch bluer than the fork tune — straight down
+    // over the basin the old value read olive-gray instead of alpine
+    p.water.color.waterColor = '#0d4554'
     // Beer-Lambert depth normalization: loadPreset silently set this to
     // the dusk OCEAN's 100 m — every depth-graded term (fallback columns,
     // deep-water saturation) was stretched 4× past our basin. This lake
