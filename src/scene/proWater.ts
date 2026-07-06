@@ -278,9 +278,14 @@ export class ProWater {
     // propeller": the submerged hull seen through clear water). Cures:
     // deeper extinction, darker body, visible refraction wobble, and
     // stronger normal response so the surface reads at nadir.
-    p.water.color.absorptionColor = '#7d4526'
-    p.water.color.transmissionColor = '#2e7b6e'
-    p.water.color.waterColor = '#0f3540'
+    // TEAL. Beautiful teal (§user, final verdict of the fork session):
+    // the old red-leaning absorption was tuned blind against the
+    // transparency bug; with honest refraction the bed showed through
+    // red-brown. Stronger red-first extinction + brighter teal
+    // transmission + deep alpine body.
+    p.water.color.absorptionColor = '#8a4a26'
+    p.water.color.transmissionColor = '#2e8574'
+    p.water.color.waterColor = '#0d434e'
     p.water.fresnel.refractionStrength = 0.35
     p.water.fresnel.normalStrength = 1.25
 
