@@ -473,6 +473,10 @@ async function boot(): Promise<void> {
     camera.aspect = window.innerWidth / window.innerHeight
     camera.updateProjectionMatrix()
     renderer.setSize(window.innerWidth, window.innerHeight)
+    // neither licensed lib watches the window; without this fan-out every
+    // screen-space buffer and the sky's temporal history stay on the old
+    // grid after a resize (permanent smear until reload)
+    pro?.resize(window.innerWidth, window.innerHeight)
   })
 
   // ---------- debug handle ----------
@@ -510,31 +514,31 @@ async function boot(): Promise<void> {
     phasePill.textContent = `${phasePillText(rendererPath)} · ${weather.tierName} ${weather.stormIndex.toFixed(0)} · ${fps.toFixed(0)} fps${drive}`
   }
 
+  // three r183 fires animation callbacks fire-and-forget: whenever the
+  // buoyancy readback awaited inside pro.update outlasts one rAF
+  // interval, TWO loop iterations interleave and presented frames
+  // alternate between two boat/camera phase states — the "3 boats
+  // ghosting" on turns, the mobile hat double-image, and a large share
+  // of the drive jitter. The guard makes overlapping callbacks no-ops.
+  let frameBusy = false
+
   renderer.setAnimationLoop(async () => {
+    if (frameBusy) return
+    frameBusy = true
     const rawDt = clock.getDelta()
     const dt = Math.min(rawDt, 0.1)
     const t = clock.elapsedTime
 
     applyWeather(dt, t)
     water?.update(dt)
+    // under Pro the legacy field still drives boat pitch/roll — but its
+    // clock only ever ticked inside the legacy WaterSystem, so the boat
+    // was scanning a FROZEN noise landscape at speed: frame-to-frame
+    // attitude aliasing that only appeared while moving (drive jitter)
+    if (!water) waveField.update(dt)
     clouds?.update(dt)
     boat.update(dt, driveMode ? input : null)
     effects.update(dt)
-
-    if (pro) {
-      // proxy carries the hull footprint; Water Pro resolves its heave
-      pro.boatProxy.position.x = boat.x
-      pro.boatProxy.position.z = boat.z
-      pro.setBoatSpeed(Math.abs(boat.speed))
-      await pro.update(dt)
-      // smooth the proxy's heave before the hull takes it — Water Pro's
-      // own smoothing assumes 60Hz steps and passes jitter through at
-      // 20fps (the resting-boat glitch)
-      const prevHeave = boat.externalHeave ?? pro.boatProxy.position.y
-      boat.externalHeave =
-        prevHeave +
-        (pro.boatProxy.position.y - prevHeave) * (1 - Math.exp(-dt * 8))
-    }
 
     // storm theater
     if (driveMode) tmpFocus.set(boat.x, 0, boat.z)
@@ -575,6 +579,25 @@ async function boot(): Promise<void> {
       )
       curLook.lerp(tmpTarget, blend)
       camera.lookAt(curLook)
+    }
+
+    // Water Pro AFTER boat + camera moves (vendor contract: its update
+    // snaps the clipmap, anchors the wake/foam windows, and renders all
+    // screen-space passes from the camera's CURRENT transform — running
+    // it before the moves meant every pass lagged one frame behind)
+    if (pro) {
+      // proxy carries the hull footprint; Water Pro resolves its heave
+      pro.boatProxy.position.x = boat.x
+      pro.boatProxy.position.z = boat.z
+      pro.setBoatSpeed(Math.abs(boat.speed))
+      await pro.update(dt)
+      // smooth the proxy's heave before the hull takes it — Water Pro's
+      // own smoothing assumes 60Hz steps and passes jitter through at
+      // 20fps (the resting-boat glitch)
+      const prevHeave = boat.externalHeave ?? pro.boatProxy.position.y
+      boat.externalHeave =
+        prevHeave +
+        (pro.boatProxy.position.y - prevHeave) * (1 - Math.exp(-dt * 8))
     }
 
     // "heavenly blinding" fix, round 3: heading dead south into the sun
@@ -624,6 +647,7 @@ async function boot(): Promise<void> {
         Math.max(0, 1400 - elapsed),
       )
     }
+    frameBusy = false
   })
 }
 
