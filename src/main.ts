@@ -163,11 +163,14 @@ async function boot(): Promise<void> {
     .then(() => pro?.attachBoat(boat))
     .catch((err) => console.error('boat load failed:', err))
 
-  // Boat spawns at (40, 420); camera sits ~50m behind so the runabout
-  // rides the bottom third of the frame with the range beyond.
+  // Opening shot (§user, last-day): the hero fills the frame — a low
+  // three-quarter portrait from the boat's starboard-aft quarter, gaze
+  // carrying past the bow to the hero range. No more ant-on-the-water.
+  // look AT the boat (dead center) from its starboard-aft quarter — the
+  // north range fills the frame behind it
   const camRig = {
-    pos: new THREE.Vector3(40 * LAKE_SCALE, 6.5, 470 * LAKE_SCALE),
-    look: new THREE.Vector3(28 * LAKE_SCALE, 21, -700 * LAKE_SCALE),
+    pos: new THREE.Vector3(40 * LAKE_SCALE + 14, 4.2, 420 * LAKE_SCALE + 14),
+    look: new THREE.Vector3(40 * LAKE_SCALE, 1.8, 420 * LAKE_SCALE),
     drift: 1,
   }
   const curLook = new THREE.Vector3().copy(camRig.look)
@@ -343,8 +346,9 @@ async function boot(): Promise<void> {
       toast.show('Tableau saved')
     }
     if (e.key === 'r' || e.key === 'R') {
-      camRig.pos.set(40 * LAKE_SCALE, 6.5, 470 * LAKE_SCALE)
-      camRig.look.set(28 * LAKE_SCALE, 21, -700 * LAKE_SCALE)
+      // R re-frames the OPENING hero shot around wherever the boat is now
+      camRig.pos.set(boat.x + 14, 4.2, boat.z + 14)
+      camRig.look.set(boat.x, 1.8, boat.z)
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false

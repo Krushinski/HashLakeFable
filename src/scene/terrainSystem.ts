@@ -221,26 +221,11 @@ function farRangeHeight(x: number, z: number): number {
 
 export class FarRanges {
   constructor(scene: THREE.Scene) {
-    // valley mist bands — translucent haze strips at the range bases give
-    // the aerial-perspective depth of the webgpu fog reference
-    const mist = new THREE.MeshBasicMaterial({
-      color: 0xcfdce2,
-      transparent: true,
-      opacity: 0.07,
-      depthWrite: false,
-    })
-    for (const [z, y, h, op] of [
-      [-1480, 95, 130, 0.075],
-      [-1950, 150, 190, 0.06],
-      [-2500, 220, 260, 0.05],
-    ]) {
-      const m = mist.clone()
-      m.opacity = op
-      const band = new THREE.Mesh(new THREE.PlaneGeometry(8200 * S, h), m)
-      band.position.set(0, y, z * S)
-      band.renderOrder = 12
-      scene.add(band)
-    }
+    // (mist bands RETIRED, last-day pass: the three translucent quads
+    // read as a hard "cloud band" floating in front of the ranges at
+    // 1.6x, and their mere existence forced the water's transparent
+    // depth+color sub-passes — two full-res clears — every frame.
+    // Water Pro's atmospheric fog owns aerial perspective now.)
     const geo = new THREE.PlaneGeometry(9000 * S, 9000 * S, 160, 160)
     geo.rotateX(-Math.PI / 2)
     const pos = geo.attributes.position as THREE.BufferAttribute

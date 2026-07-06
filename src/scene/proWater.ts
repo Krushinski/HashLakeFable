@@ -46,13 +46,23 @@ const WATER_TIERS = {
   swellLen: [18, 22, 28, 34, 42],
 }
 
+/** Water quality tier. HIGH is the demo look: domain-warped foam + screen
+ *  refraction + 256/256 FFT — the two features that make the vendor
+ *  demo's surface lacework. ?wqmedium falls back for the fps A/B. */
+const WATER_QUALITY = new URLSearchParams(location.search).has('wqmedium')
+  ? ('medium' as const)
+  : ('high' as const)
+
 /** FFT cascade tiles, lake-scaled (dusk ships 2642 m / 241 m — ocean fetch).
  *  Order invariant: cascade 0 (waves) must stay larger than 1 (ripples).
  *  NOTE (verified in lib): effective world tile = scale * resolution/256,
- *  so at medium (cascade0 res 128) a config of 840 tiles the world every
- *  420 m — the value below is pre-compensated. Ripples (res 256) are 1:1. */
+ *  so the waves cascade config is tier-compensated (res 128 at medium,
+ *  256 at high) to hold the same 420 m world tile. Ripples (256) are 1:1. */
 const CASCADES = {
-  waves: { scale: 840, amplitudeScale: 0.2 },
+  waves: {
+    scale: WATER_QUALITY === 'medium' ? 840 : 420,
+    amplitudeScale: 0.2,
+  },
   ripples: { scale: 90, amplitudeScale: 0.083 },
 }
 
@@ -159,6 +169,11 @@ export class ProWater {
     // (SSR steps, FFT res, mesh segments all stay medium).
     QUALITY_LEVELS.medium.sprayMaxParticles = 512
     QUALITY_LEVELS.medium.sprayEnabledByDefault = true
+    // Full-res scene color at high (ultra's value): the half-res copy is
+    // what refraction samples, and its edge texels bled the dark hull
+    // one half-res step into the surrounding water — the last layer of
+    // the "fuzz around the hero" (§user). Costs ~1 ms.
+    QUALITY_LEVELS.high.sceneColorResolutionScale = 1.0
     // NOTE: deterministic fixed-substep mode measured 1 fps here (its
     // per-substep sync points serialize the GPU) — stability comes from
     // the dt clamp in update() instead: one sim step per frame, never
@@ -166,7 +181,7 @@ export class ProWater {
     // the wake solver's stability limit — the field amplified its own
     // energy into jagged peaks no friction could damp (the "nightmare
     // physics" / hurricane-shake session).
-    p.water = await WaterSystem.create(renderer, scene, camera, 'medium')
+    p.water = await WaterSystem.create(renderer, scene, camera, WATER_QUALITY)
     p.water.loadPreset(getPresetParams('dusk'))
     p.water.updateCascadeConfig(0, CASCADES.waves)
     p.water.updateCascadeConfig(1, CASCADES.ripples)
@@ -369,7 +384,12 @@ export class ProWater {
     // deep-water saturation) was stretched 4× past our basin. This lake
     // bottoms out at 26 m.
     p.water.color.waterDepth = 26
-    p.water.fresnel.refractionStrength = 0.35
+    // 0.35 was tuned while refraction sampled a broken black texture —
+    // at high tier with honest full-res scene color it over-bent far
+    // enough to stamp a pale hull-shaped phantom into the foam beside
+    // the boat (verified live at the sandbar). 0.16 wobbles without
+    // stealing hull pixels.
+    p.water.fresnel.refractionStrength = 0.16
     p.water.fresnel.normalStrength = 1.25
 
     // X-ARTIFACT PRIME SUSPECT: rain is the only world-anchored system
@@ -400,6 +420,29 @@ export class ProWater {
   attachBoat(boat: BoatSystem): void {
     this.boatRef = boat
     this.wakeAnchor.position.set(boat.group.position.x, 0, boat.group.position.z)
+
+    // The flag and scarf sway via TSL positionNode — but the water's
+    // depth pass re-renders meshes with replacement materials that DON'T
+    // carry the animation, so their aux-pass depth lies every frame and
+    // every consumer (SSR, fog composite, refraction) speckles around
+    // them (a big slice of the "fuzz around Satoshi", §user). Exclude
+    // the animated cloth from the aux passes — thin waving cloth reads
+    // fine as background there.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpm = (this.water as any).renderPassManager
+    boat.group.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      const name = mesh.name
+      if (
+        name.includes('Flag') ||
+        name.includes('Scarf') ||
+        o.parent?.name.includes('Flag')
+      ) {
+        rpm?.depthPass?.excludeObject?.(mesh)
+        rpm?.sceneColorPass?.excludeObject?.(mesh)
+      }
+    })
     this.water.buoyancy.addObject(this.boatProxy, {
       multiPoint: true,
       useBoundingBox: false,

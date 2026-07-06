@@ -99,12 +99,12 @@ export class ForestSystem {
       if (s < minShore || s > maxShore) return false
       for (const p of slots) {
         const d2 = (p.x - x) ** 2 + (p.z - z) ** 2
-        if (d2 < (hero ? 36 : 52)) return false
+        if (d2 < (hero ? 36 : 20)) return false
       }
       slots.push({
         x,
         z,
-        scale: 0.75 + rand() * 0.55,
+        scale: 0.85 + rand() * 0.6,
         rot: rand() * Math.PI * 2,
         hero,
       })
@@ -119,11 +119,21 @@ export class ForestSystem {
     tryPlace(560 * S, 630 * S, 4, 400 * S, true)
     tryPlace(640 * S, 480 * S, 4, 400 * S, true)
 
-    // scattered ring around the whole lake
-    for (let i = 0; i < 8000 && slots.length < 520; i++) {
+    // clumped ring around the whole lake — forests grow in CLUSTERS, not
+    // even speckle ("ants on a hill", §user last-day): each seed drops a
+    // stand of 2-6 trees within ~4-16 m, so the shoreline reads as
+    // coherent dark masses with gaps instead of uniform dots
+    for (let i = 0; i < 3000 && slots.length < 840; i++) {
       const ang = rand() * Math.PI * 2
       const rad = (500 + rand() * 700) * S
-      tryPlace(Math.sin(ang) * rad, Math.cos(ang) * rad * 0.92 + 40, 10, 320)
+      const cx = Math.sin(ang) * rad
+      const cz = Math.cos(ang) * rad * 0.92 + 40
+      const n = 2 + Math.floor(rand() * 5)
+      for (let j = 0; j < n && slots.length < 840; j++) {
+        const a = rand() * Math.PI * 2
+        const r = 3.5 + rand() * 13
+        tryPlace(cx + Math.sin(a) * r, cz + Math.cos(a) * r, 10, 320)
+      }
     }
 
     const heroSlots = slots.filter((s) => s.hero)
@@ -179,6 +189,10 @@ export class ForestSystem {
       side: THREE.DoubleSide,
       roughness: 1,
       metalness: 0,
+      // knock the far cards down a step — full-brightness sprites against
+      // the meadow read as high-contrast confetti; distant conifers sit
+      // darker and cooler than near ones (cheap aerial perspective)
+      color: 0xb4bfae,
     })
     const IW = 9
     const IH = 16.5
@@ -205,21 +219,30 @@ export class ForestSystem {
 
     interface ImpSlot { x: number; z: number; scale: number; rot: number }
     const impSlots: ImpSlot[] = []
-    for (let i = 0; i < 60000 && impSlots.length < 10000; i++) {
+    // clumped like the near ring: stands of 3-8 cards, tighter packing —
+    // distant forest reads as a closed dark canopy, not confetti
+    for (let i = 0; i < 20000 && impSlots.length < 10000; i++) {
       const ang = rand() * Math.PI * 2
       const rad = (640 + rand() * 1500) * S
-      const x = Math.sin(ang) * rad
-      const z = Math.cos(ang) * rad * 0.92 + 40 * S
-      const s = shoreSdf(x, z)
-      if (s < 50 || s > 1200 * S) continue
-      const h = terrainHeight(x, z)
-      if (h > 140) continue // hug the lake bowl — high trees read as ants
-      let ok = true
-      for (const p of impSlots) {
-        if ((p.x - x) ** 2 + (p.z - z) ** 2 < 44) { ok = false; break }
+      const cx = Math.sin(ang) * rad
+      const cz = Math.cos(ang) * rad * 0.92 + 40 * S
+      const n = 3 + Math.floor(rand() * 6)
+      for (let j = 0; j < n && impSlots.length < 10000; j++) {
+        const a = rand() * Math.PI * 2
+        const r = 2.5 + rand() * 8.5
+        const x = cx + Math.sin(a) * r
+        const z = cz + Math.cos(a) * r
+        const s = shoreSdf(x, z)
+        if (s < 50 || s > 1200 * S) continue
+        const h = terrainHeight(x, z)
+        if (h > 140) continue // hug the lake bowl — high trees read as ants
+        let ok = true
+        for (const p of impSlots) {
+          if ((p.x - x) ** 2 + (p.z - z) ** 2 < 16) { ok = false; break }
+        }
+        if (!ok) continue
+        impSlots.push({ x, z, scale: 0.7 + rand() * 0.65, rot: rand() * Math.PI })
       }
-      if (!ok) continue
-      impSlots.push({ x, z, scale: 0.65 + rand() * 0.6, rot: rand() * Math.PI })
     }
     const impInst = new THREE.InstancedMesh(impGeo, impMat, impSlots.length)
     impSlots.forEach((s, i) => {
