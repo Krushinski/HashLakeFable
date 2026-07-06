@@ -488,14 +488,17 @@ export class TerrainSystem {
           smoothstep(float(0.25), float(1.6), vHeight),
         ),
       )
+      // beach begins AT the waterline (red-hunt: the old -0.35 start
+      // blended up to 60% warm damp-sand onto SUBMERGED fragments — a
+      // tan rim tracing every shoreline under the first 30 cm of water)
       let ground = mix(bed, beachToGrass,
-        smoothstep(float(-0.35), float(0.25), vHeight))
+        smoothstep(float(-0.05), float(0.3), vHeight))
 
       // wet-sand waterline band — recently-licked sand just above the
       // water, darker and saturated, pocketed by grain so it never reads
       // as a painted contour ring (pairs with the roughness drop above)
       const wetSand = color(0xa89d80)
-      const wetMask = smoothstep(float(-0.12), float(0.1), vHeight)
+      const wetMask = smoothstep(float(0.0), float(0.14), vHeight)
         .mul(float(1).sub(smoothstep(float(0.22), float(0.6), vHeight)))
         .mul(grain.mul(0.18).add(0.82))
       ground = mix(ground, wetSand, wetMask.mul(0.85))

@@ -23,17 +23,19 @@ export const WATER_LEVEL = 0
  * are the canonical proportions, and every export is uniformly scaled,
  * so the world grows without the shape ever changing.
  *
- * 1.3x — SECOND VERDICT (user, same day): 1.6 still "swallowing the
- * intimate beauty"; hard to reach shores on mobile. 1.3 makes the basin
- * a place, not an expanse — main body ~1.7 km across, a full-throttle
- * rip still runs ~70 s a lap, and every shore is minutes away at cruise.
+ * 0.75x — THIRD VERDICT (user, driving the deployed 2.2 build): "far
+ * too huge... it could be 1/3 of this size and honestly we should try
+ * that." 0.75 IS a third of 2.2 — main body ~960 m across, every shore
+ * a short cruise, the mountains loom (heights stay absolute), and the
+ * terrain mesh tightens to 6 m vertices (smoother island edges free).
+ * A 150 mph pass still crosses the basin in ~15 s — a rip, not a slog.
  *
- * ?scale=1.6 still overrides for A/B laps — every consumer derives from
- * this at module init, so the whole world rebuilds on reload.
+ * ?scale=1.0 / ?scale=1.3 override for A/B laps — every consumer
+ * derives from this at module init; the world rebuilds on reload.
  */
 const SCALE_PROBE = Number(new URLSearchParams(location.search).get('scale'))
 export const LAKE_SCALE =
-  SCALE_PROBE >= 1 && SCALE_PROBE <= 3 ? SCALE_PROBE : 1.3
+  SCALE_PROBE >= 0.5 && SCALE_PROBE <= 3 ? SCALE_PROBE : 0.75
 
 /** World-space square covered by the lake data texture, centered on origin. */
 export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)

@@ -102,6 +102,8 @@ export class BoatSystem {
   private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
+  /** Prop assembly (PropShaft/PropHub/PropBlade*) — spun with throttle. */
+  private readonly propMeshes: THREE.Mesh[] = []
   private ready = false
 
   constructor(
@@ -138,6 +140,11 @@ export class BoatSystem {
       }
       if (mesh.name.includes('Scarf')) {
         this.riggedScarf(mesh)
+      }
+      // the running gear spins with throttle (§user) — blades + hub only;
+      // the shaft is visually static and the rudder steers, not spins
+      if (mesh.name.startsWith('PropBlade') || mesh.name === 'PropHub') {
+        this.propMeshes.push(mesh)
       }
     })
 
@@ -386,6 +393,15 @@ export class BoatSystem {
     // flag wind: base breeze + speed
     this.uFlagWind.value = 0.6 + Math.min(2.2, Math.abs(this.speed) * 0.06) +
       this.waveField.params.chopScale * 0.4
+
+    // prop spin: revs follow throttle (idle tickover when moving at all,
+    // full churn at speed; reverses with reverse). Incremental rotation
+    // about each mesh's local shaft axis (authored bow -x → shaft = X).
+    if (this.propMeshes.length && Math.abs(this.speed) > 0.1) {
+      const revs =
+        (2.5 + Math.abs(this.speed) * 1.3) * Math.sign(this.speed) * dt
+      for (const m of this.propMeshes) m.rotateX(revs)
+    }
 
     void input
   }

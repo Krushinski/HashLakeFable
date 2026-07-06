@@ -226,15 +226,23 @@ export class ProWater {
     p.water.floor.caustics.intensity = 1.15 // white sand carries caustics
     p.water.floor.caustics.waveDistortion = 0.28
 
-    // the dusk preset ships warm-amber lights that brown the alpine
-    // meadows — neutralize toward clean daylight. Whiter + slightly
-    // softer than the fork tune: the old warmth read as oversaturated
-    // wax on the hero hull up close (§user, last-day pass).
-    p.water.lighting.sunLight.color.set(0xfff8ee)
-    p.water.lighting.sunLight.intensity = 3.1
-    p.water.lighting.hemisphereLight.color.set(0xbdd5e4)
-    p.water.lighting.hemisphereLight.groundColor.set(0x4d5a44)
-    p.water.lighting.hemisphereLight.intensity = 0.85
+    // THE PINK SUN (red-hunt, certainty-grade): the vendor's lighting
+    // subsystem re-syncs the THREE lights from ITS OWN sources every
+    // frame — the old writes to sunLight/hemisphereLight died within a
+    // frame, leaving dusk's salmon-pink sun (#fdc4c9 @ 2.0) and dim warm
+    // ambient painting every surface tan for WEEKS. This is why no bed
+    // palette change could ever kill the red. Write the SOURCES. The rig
+    // is blackFlag's daylight — near-white sun + bright pale-CYAN
+    // ambient, the actual secret of the demo's white-sand look.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lighting = p.water.lighting as any
+    lighting.sun.color.set(0xfffef5)
+    if (lighting.sun.intensity?.value !== undefined) {
+      lighting.sun.intensity.value = 2.5
+    }
+    lighting.ambient.skyColor.set(0xd2e3f9)
+    lighting.ambient.groundColor.set(0xabe0f2)
+    lighting.ambient.intensity = 1.3
 
     // dusk's warm-brown atmospheric fog repaints the whole basin — pull
     // it back to a thin alpine haze. (The old 'startDistance'/'start'
@@ -381,7 +389,12 @@ export class ProWater {
     // transparency bug; with honest refraction the bed showed through
     // red-brown. Stronger red-first extinction + brighter teal
     // transmission + deep alpine body.
-    p.water.color.absorptionColor = '#8a4a26'
+    // ABSORPTION, corrected for sRGB→linear (red-hunt): '#8a4a26'
+    // converts to only 0.25/m red extinction — 78% of red SURVIVED a
+    // 1 m column, so the shore shelves never developed the turquoise
+    // veil. '#ff5a2e' is 1.0/m linear red kill: pale turquoise by
+    // 0.5 m over white sand, saturated by 3 m — the demo gradient.
+    p.water.color.absorptionColor = '#ff5a2e'
     p.water.color.transmissionColor = '#2e8574'
     // deep-body hue: a notch bluer than the fork tune — straight down
     // over the basin the old value read olive-gray instead of alpine
