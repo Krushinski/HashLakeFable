@@ -6,7 +6,7 @@ import {
   QUALITY_LEVELS,
 } from '../threejs-water-pro'
 import { SkySystem, PRESETS as SKY_PRESETS } from '../threejs-sky-pro'
-import { LAKE_SCALE } from './lakeMap'
+import { LAKE_SCALE, waterDepth } from './lakeMap'
 import type { BoatSystem } from './boatSystem'
 
 /**
@@ -66,8 +66,10 @@ const CASCADES = {
   ripples: { scale: 90, amplitudeScale: 0.083 },
 }
 
-/** Sky preset per tier band. */
-const SKY_TIERS = ['partlyCloudy', 'partlyCloudy', 'hazy', 'stormyEvening', 'thunderstorm'] as const
+/** Sky preset per tier band. Serene gets the FABLE GLOW — bright sunny
+ *  stylized cumulus (§user: "absolutely stunning and sunny"), not gray
+ *  partly-cloudy. */
+const SKY_TIERS = ['pixar', 'partlyCloudy', 'hazy', 'stormyEvening', 'thunderstorm'] as const
 
 function lerpA(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
@@ -139,15 +141,15 @@ export class ProWater {
     p.sky = await SkySystem.create({
       renderer,
       camera,
-      // 'high' on both libs pinned the RTX 3050 at ~18 fps — and low fps
-      // is upstream of everything: solver stability margins, cloud
-      // reprojection swim, input feel. Medium buys the headroom back.
-      quality: 'medium',
+      // 'high' on BOTH libs pinned the 3050 at ~18 fps in the 2.2 world —
+      // but the world has shrunk and the waste is gone since. Water runs
+      // high now; ?skyhigh probes the volumetric-cloud tier on top.
+      quality: flags.has('skyhigh') ? 'high' : 'medium',
       // mid-afternoon alpine light — high, bright sun
       timeOfDay: { time: 0.58 },
     })
     console.log('[boot] sky:preset')
-    await p.sky.applyPreset(SKY_PRESETS.partlyCloudy)
+    await p.sky.applyPreset(SKY_PRESETS.pixar)
 
     // Sky Pro bakes a 256² cloud-shadow map EVERY frame (65k texels × 8
     // light steps of 3D noise) whose only consumers are god-rays and the
@@ -221,7 +223,7 @@ export class ProWater {
     // a touch brighter since our shallows are where the eye lives.
     p.water.floor.setVisible(false)
     p.water.floor.caustics.scale = 34
-    p.water.floor.caustics.intensity = 1.0
+    p.water.floor.caustics.intensity = 1.15 // white sand carries caustics
     p.water.floor.caustics.waveDistortion = 0.28
 
     // the dusk preset ships warm-amber lights that brown the alpine
@@ -263,8 +265,11 @@ export class ProWater {
     // Visible-wake tune (verified against the sim's gating math): the
     // dt-clamped sim runs ~40% speed at 25fps and rarely reaches 0.2
     // steepness, which is why the old trail was near-invisible.
-    p.water.wake.foamStrength = 1.0
-    p.water.wake.foamBreakThreshold = 0.08
+    // trail richened for the smaller swell tune (§user: "where did my
+    // beautiful wake go?" — less displacement means less steepness, so
+    // foam must deposit a touch easier and harder to keep the ribbon)
+    p.water.wake.foamStrength = 1.25
+    p.water.wake.foamBreakThreshold = 0.06
 
     // Nobody dives in this game — and the underwater pass is what
     // painted the teal band across the screen bottom whenever a camera
@@ -349,9 +354,11 @@ export class ProWater {
     p.water.ssr.enabled = !flags.has('nossr')
     // dusk ships SSR strength 0.9 — at near-grazing chase angles that
     // smears a dark screen-space ghost of the hull sideways across the
-    // water ("reflection that shouldn't be there", §user). Half strength
-    // keeps the near-field mirror without the elongated phantom.
-    p.water.ssr.strength = 0.45
+    // water ("reflection that shouldn't be there", §user). SSR is the
+    // ONLY source of boat-on-water reflections (the env map is sky-only,
+    // no hidden cameras) — 0.3 keeps the drifting mirror; setBoatSpeed
+    // fades it further with throttle where the artifacts live.
+    p.water.ssr.strength = 0.3
 
     // ?nofog probe for the tan bottom-of-screen haze band (set at
     // create-time — post-build toggles black-screen)
@@ -601,14 +608,29 @@ export class ProWater {
     if (this.sternWakeId < 0) return
     const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)
+    // shallow-water attenuation (§user): full-throttle swells near shore
+    // dug the trough below the bed — naked lakebed flashing through the
+    // surface. Displacement fades as the column thins; the hull grounds
+    // at 0.7 m anyway.
+    let shallow = 1
+    if (this.boatRef) {
+      const d = waterDepth(this.boatRef.x, this.boatRef.z)
+      shallow = Math.min(1, Math.max(0.3, (d - 0.8) / 2.7))
+    }
+    // top-end swell trimmed (§user: 150 mph wake "slightly too big"):
+    // stern peaks at 1.15 not 1.4 — still a real wall, no basin-churner
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.7 + k * 0.7) * idle,
+      depth: (0.7 + k * 0.45) * idle * shallow,
       radius: 4.5 + k * 1.5,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: (0.45 + k * 0.35) * idle,
+      depth: (0.45 + k * 0.22) * idle * shallow,
       radius: 3.5 + k * 1.0,
     })
+    // SSR fades with speed: screen-space reflections are where the
+    // "impossible" displaced hull ghosts live, and they worsen with
+    // motion — near-mirror when drifting, whisper at full throttle
+    this.water.ssr.strength = 0.3 - k * 0.12
   }
 
   /** Bitcoin weather → spectrum + sky. Called from the tier applier. */

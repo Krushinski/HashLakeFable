@@ -352,11 +352,14 @@ export class TerrainSystem {
       const patch = mx_noise_float(vec3(worldXZ.mul(0.004), 3.1))
       const macro = mx_noise_float(vec3(worldXZ.mul(0.0008), 12.9))
 
-      // palette
-      const bedDeep = color(0x1e2b1a)
-      const bedSand = color(0xb8a67f)
-      const dampSand = color(0x8f8064)
-      const drySand = color(0xd3c49d)
+      // palette — WHITE SAND doctrine (§user, demo reference): beautiful
+      // seafloors are not brown or red. Pale cream sand under the water
+      // is what turns the shallows turquoise (the absorption strips red
+      // for free); beaches bleach toward white at the waterline.
+      const bedDeep = color(0x2c3d36)
+      const bedSand = color(0xd8d0b6)
+      const dampSand = color(0xb3a98d)
+      const drySand = color(0xe9e1c8)
       const grassLush = color(0x4e7038)
       const grassDeep = color(0x35522c)
       const meadowDry = color(0x6d7f42)
@@ -382,22 +385,27 @@ export class TerrainSystem {
       const silt = mx_noise_float(vec3(worldXZ.mul(0.013), 17.3))
         .mul(0.5)
         .add(0.5)
-      const siltMask = smoothstep(float(3), float(9), depthM)
-        .mul(silt)
-        .mul(0.5)
+      // thresholded so the patches have EDGES (soft-airbrushed silt read
+      // as murk; the demo's floor is white sand + distinct dark patches)
+      const siltMask = smoothstep(float(1), float(4.5), depthM)
+        .mul(float(1).sub(smoothstep(float(10), float(16), depthM)))
+        .mul(smoothstep(float(0.52), float(0.74), silt))
+        .mul(0.7)
 
       // submerged sand cools toward olive within the first couple of
       // meters — the warm dry-sand tan straight down through half a
       // meter of water read as RED at nadir (§user). Dry sand above the
       // line keeps its warmth.
-      const bedCool = color(0x8a8570)
+      const bedCool = color(0xbfbaa6)
       let bed = mix(
         mix(bedSand, bedCool, smoothstep(float(0.05), float(0.9), depthM)),
         bedDeep,
         smoothstep(float(-2), float(-9), vHeight),
       )
-      bed = bed.mul(ripples.mul(0.16).mul(rippleMask).add(1))
-      bed = mix(bed, color(0x24331f), siltMask)
+      bed = bed.mul(ripples.mul(0.2).mul(rippleMask).add(1))
+      // reef/rock patches — the dark cool blotches that give the demo's
+      // top-down its structure against the white sand
+      bed = mix(bed, color(0x3a4a41), siltMask)
 
       // beach band — narrow, pocketed by noise so it isn't a uniform rim.
       // Dry sand arrives by ~0.45 m so low features (the 0.9 m sandbar
@@ -486,7 +494,7 @@ export class TerrainSystem {
       // wet-sand waterline band — recently-licked sand just above the
       // water, darker and saturated, pocketed by grain so it never reads
       // as a painted contour ring (pairs with the roughness drop above)
-      const wetSand = color(0x74654c)
+      const wetSand = color(0xa89d80)
       const wetMask = smoothstep(float(-0.12), float(0.1), vHeight)
         .mul(float(1).sub(smoothstep(float(0.22), float(0.6), vHeight)))
         .mul(grain.mul(0.18).add(0.82))

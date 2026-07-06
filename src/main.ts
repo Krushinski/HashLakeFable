@@ -42,9 +42,10 @@ const phasePill = document.getElementById('phase-pill') as HTMLDivElement
 const appHost = document.getElementById('app') as HTMLDivElement
 
 const bootStartedAt = performance.now()
-// v3: the 1.6× size verdict re-shaped the world again — the key bump
-// quietly retires 2.2-era poses (the afloat guard below catches the rest)
-const TABLEAU_KEY = 'hashlake.tableau.v3'
+// v4: the 1.3× intimacy verdict re-shaped the world again — the key bump
+// retires stale poses (a saved tableau was ALSO hiding the new opening
+// hero shot on the user's machines; the afloat guard catches the rest)
+const TABLEAU_KEY = 'hashlake.tableau.v4'
 
 function showFallback(reason: unknown): void {
   console.error('HashLake boot failed:', reason)

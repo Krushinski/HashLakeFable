@@ -23,18 +23,17 @@ export const WATER_LEVEL = 0
  * are the canonical proportions, and every export is uniformly scaled,
  * so the world grows without the shape ever changing.
  *
- * 1.6x — THE SIZE VERDICT (user lap, 2026-07-06): 2.2 read as "too big,
- * everything open and far away; the water overcompensating". 1.6 keeps
- * full-throttle lap room while pulling the shores close enough that
- * Water Pro's near-field detail (refraction, foam, spray, caustics)
- * carries the frame.
+ * 1.3x — SECOND VERDICT (user, same day): 1.6 still "swallowing the
+ * intimate beauty"; hard to reach shores on mobile. 1.3 makes the basin
+ * a place, not an expanse — main body ~1.7 km across, a full-throttle
+ * rip still runs ~70 s a lap, and every shore is minutes away at cruise.
  *
- * ?scale=1.8 still overrides for A/B laps — every consumer derives from
+ * ?scale=1.6 still overrides for A/B laps — every consumer derives from
  * this at module init, so the whole world rebuilds on reload.
  */
 const SCALE_PROBE = Number(new URLSearchParams(location.search).get('scale'))
 export const LAKE_SCALE =
-  SCALE_PROBE >= 1.2 && SCALE_PROBE <= 3 ? SCALE_PROBE : 1.6
+  SCALE_PROBE >= 1 && SCALE_PROBE <= 3 ? SCALE_PROBE : 1.3
 
 /** World-space square covered by the lake data texture, centered on origin. */
 export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)
@@ -80,11 +79,14 @@ export const ISLAND = {
   crest: 3.6,
   landR: 74 * LAKE_SCALE,
 }
+// sandbar tightened (§user: the old 160×60 footprint sprawled a huge
+// underwater shadow across the south shallows — a bar should read as a
+// slim bright ribbon, not a submerged continent)
 export const SANDBAR = {
   cx: 230 * LAKE_SCALE,
   cz: 360 * LAKE_SCALE,
-  rx: 160 * LAKE_SCALE,
-  rz: 60 * LAKE_SCALE,
+  rx: 105 * LAKE_SCALE,
+  rz: 42 * LAKE_SCALE,
   rot: -0.35,
   crest: 0.9,
 }
