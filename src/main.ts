@@ -71,8 +71,9 @@ const TIER_VISUALS = {
   fogNear: [2700, 2400, 1900, 1450, 1100],
   fogFar: [9000, 8200, 6900, 5400, 4500],
 }
-/** Scene-fog distances ride the world size (anchors tuned at 2.2×). */
-const FOG_WORLD = LAKE_SCALE / 2.2
+/** Scene-fog distances ride the world size (anchors tuned at 2.2×) —
+ *  floored at 0.55: the atmosphere doesn't shrink with the map. */
+const FOG_WORLD = Math.max(0.55, LAKE_SCALE / 2.2)
 
 function lerpAnchors(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
@@ -99,10 +100,19 @@ async function boot(): Promise<void> {
   // phones, insecure http origins — get the round-5 legacy stack instead.
   const USE_PRO = PREFER_PRO && rendererPath === 'WebGPU'
 
-  // Under Water Pro the per-pixel cost dominates: at 1.5 the 3050 shades
-  // ~2.2x the pixels of native 1080p. Frame pacing is upstream of the
-  // jitter/sky-smear complaints — sharpness can be bought back later.
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, USE_PRO ? 1.0 : 1.5))
+  // Under Water Pro the per-pixel cost dominates. PIXEL BUDGET (§user:
+  // 11 fps on the 4K desktop): cap the render at ~2.4 MP — about
+  // 1080p-and-a-half — and let the browser upscale. Slight softness on
+  // huge monitors buys the frame rate back; small screens are untouched.
+  const PIXEL_BUDGET = 2.4e6
+  const applyPixelBudget = () => {
+    const base = Math.min(window.devicePixelRatio, USE_PRO ? 1.0 : 1.5)
+    const px = window.innerWidth * window.innerHeight * base * base
+    renderer.setPixelRatio(
+      px > PIXEL_BUDGET ? base * Math.sqrt(PIXEL_BUDGET / px) : base,
+    )
+  }
+  applyPixelBudget()
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 0.5
@@ -505,6 +515,7 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight
     camera.updateProjectionMatrix()
+    applyPixelBudget()
     renderer.setSize(window.innerWidth, window.innerHeight)
     // neither licensed lib watches the window; without this fan-out every
     // screen-space buffer and the sky's temporal history stay on the old

@@ -40,7 +40,12 @@ export const LAKE_SCALE =
 /** World-space square covered by the lake data texture, centered on origin. */
 export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)
 
-export const MAX_LAKE_DEPTH = 26
+// 14 not 26 (§user, post-turquoise): at 26 m the basin raced to
+// near-black in a 960 m lake — hard color terraces where the shelf
+// dropped. 14 m keeps the whole body in the turquoise-to-deep-teal
+// band, spreads the gradient across the full basin, and lets caustics
+// and bed shapes read further out.
+export const MAX_LAKE_DEPTH = 14
 
 interface Blob {
   cx: number
@@ -78,7 +83,11 @@ export const ISLAND = {
   cx: -235 * LAKE_SCALE,
   cz: 305 * LAKE_SCALE,
   r: 155 * LAKE_SCALE,
-  crest: 3.6,
+  // 2.6 not 3.6 (§user, turquoise pass): a lower, rounder dome gives a
+  // gentler shore slope — the waterline contour wanders smoothly across
+  // the 6 m terrain triangles instead of zigzagging, and the beach ring
+  // widens
+  crest: 2.6,
   landR: 74 * LAKE_SCALE,
 }
 // sandbar tightened (§user: the old 160×60 footprint sprawled a huge
@@ -90,7 +99,7 @@ export const SANDBAR = {
   rx: 105 * LAKE_SCALE,
   rz: 42 * LAKE_SCALE,
   rot: -0.35,
-  crest: 0.9,
+  crest: 0.7,
 }
 
 function blobSdf(x: number, z: number, b: Blob): number {
@@ -180,21 +189,23 @@ export function bedHeight(x: number, z: number): number {
   // Gentle bed relief so the shallows aren't a perfect ramp.
   bed += fbm2(x * 0.003, z * 0.003, { octaves: 3, seed: 41 }) * 1.6 * t
 
-  // Island: cubic-falloff plateau — flat-topped, steep sides, wide
-  // beach shelf; relief noise breaks the marshmallow dome
+  // Island: rounded plateau — softer falloff exponent than the old
+  // cubic so the rim slope is gentle where it crosses the waterline
+  // (smooth sand contour, not triangle zigzag); relief noise still
+  // breaks the marshmallow dome but scaled to the lower crest
   const du = Math.hypot(x - ISLAND.cx, z - ISLAND.cz) / ISLAND.r
-  const islandG = Math.exp(-Math.pow(du, 3) * 1.2)
+  const islandG = Math.exp(-Math.pow(du, 2.4) * 1.4)
   bed = Math.max(
     bed,
     -MAX_LAKE_DEPTH + (ISLAND.crest + MAX_LAKE_DEPTH) * islandG,
   )
   if (islandG > 0.5) {
-    // strong dune-and-hollow relief — the dome must never read as a
+    // dune-and-hollow relief — the dome must never read as a
     // marshmallow (§user, twice)
     bed += (islandG - 0.5) * 2 *
-      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 3.4
+      fbm2(x * 0.02, z * 0.02, { octaves: 3, seed: 91 }) * 2.2
     bed += (islandG - 0.5) * 2 *
-      Math.max(0, fbm2(x * 0.045, z * 0.045, { octaves: 2, seed: 17 })) * 1.6
+      Math.max(0, fbm2(x * 0.045, z * 0.045, { octaves: 2, seed: 17 })) * 1.1
   }
 
   const bar = gaussianBump(

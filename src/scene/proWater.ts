@@ -150,6 +150,7 @@ export class ProWater {
     })
     console.log('[boot] sky:preset')
     await p.sky.applyPreset(SKY_PRESETS.pixar)
+    p.liftCloudDeck(0)
 
     // Sky Pro bakes a 256² cloud-shadow map EVERY frame (65k texels × 8
     // light steps of 3D noise) whose only consumers are god-rays and the
@@ -250,7 +251,10 @@ export class ProWater {
     // fadeStart/fadeEnd/fadePower.) Distances RIDE LAKE_SCALE — they
     // were tuned at 2.2 (far shore ~4.5 km) and must shrink with the
     // world or the haze never reaches the near shores.
-    const FOG_S = LAKE_SCALE / 2.2
+    // FLOOR at 0.55: air doesn't shrink with the map — pure linear
+    // scaling at 0.75x put fadeStart at ~480 m and muted the shore
+    // treeline into gray soup (§user)
+    const FOG_S = Math.max(0.55, LAKE_SCALE / 2.2)
     p.water.fog.color = '#c4d2d8'
     p.water.fog.fadeStart = 1400 * FOG_S
     p.water.fog.fadeEnd = 9000 * FOG_S
@@ -347,7 +351,7 @@ export class ProWater {
     // foam texture as pale streak lines. range 4 = the water only
     // clears in the last ~2 m of column at the true beach edge — a
     // legible waterline instead of a vanishing lake.
-    p.water.foam.shoreline.range = 4
+    p.water.foam.shoreline.range = 5.5
 
     // SSR: the medium-tier clamp only runs at create — a post-create
     // enable STICKS, and it also turns on the scene-color pass that
@@ -395,15 +399,17 @@ export class ProWater {
     // veil. '#ff5a2e' is 1.0/m linear red kill: pale turquoise by
     // 0.5 m over white sand, saturated by 3 m — the demo gradient.
     p.water.color.absorptionColor = '#ff5a2e'
-    p.water.color.transmissionColor = '#2e8574'
+    // brighter teal in-scatter — pushes the shoreline turquoise band
+    // further out (§user: "more teals near the shorelines")
+    p.water.color.transmissionColor = '#33a189'
     // deep-body hue: a notch bluer than the fork tune — straight down
     // over the basin the old value read olive-gray instead of alpine
     p.water.color.waterColor = '#0d4554'
     // Beer-Lambert depth normalization: loadPreset silently set this to
     // the dusk OCEAN's 100 m — every depth-graded term (fallback columns,
     // deep-water saturation) was stretched 4× past our basin. This lake
-    // bottoms out at 26 m.
-    p.water.color.waterDepth = 26
+    // bottoms out at MAX_LAKE_DEPTH (14 m post-turquoise verdict).
+    p.water.color.waterDepth = 14
     // 0.35 was tuned while refraction sampled a broken black texture —
     // at high tier with honest full-res scene color it over-bent far
     // enough to stamp a pale hull-shaped phantom into the foam beside
@@ -678,7 +684,23 @@ export class ProWater {
     const skyBand = Math.min(4, Math.floor(tierT + skyDark))
     if (skyBand !== this.lastSkyBand) {
       this.lastSkyBand = skyBand
-      void this.sky.applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
+      void this.sky
+        .applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
+        .then(() => this.liftCloudDeck(skyBand))
+    }
+  }
+
+  /** Calm/mild skies ride a HIGHER cloud deck: preset bases (~1400 m)
+   *  sit right at the summit line of the now-close hero range and read
+   *  as a low gray lid chopping the peaks (§user, turquoise pass).
+   *  Storm tiers keep their brooding preset altitude — presets reset
+   *  the uniform, so this re-asserts after every calm-band switch. */
+  private liftCloudDeck(band: number): void {
+    if (band > 2) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clouds = (this.sky as any).clouds
+    if (clouds?.altitude?.value !== undefined) {
+      clouds.altitude.value = Math.max(clouds.altitude.value, 2300)
     }
   }
 
