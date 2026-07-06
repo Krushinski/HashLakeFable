@@ -86,6 +86,15 @@ export class ProWater {
    *  verbatim; boat motion is always < 175 m/frame, so the field can never
    *  hard-clear from camera pitch swings or C-preset teleports again. */
   private readonly wakeAnchor = new THREE.Object3D()
+  /** Stern-spray mount: copies the boat pose each frame, then sweeps
+   *  vertically through the displaced surface while planing. The spray
+   *  gate only fires on a downward surface CROSSING — a planing hull on
+   *  calm water never crosses on its own (verified live: 0-3% duty at
+   *  Serene even with near-zero thresholds), so the rig manufactures
+   *  the crossings at a cadence we own. Parked, it rides the pose
+   *  exactly and stays silent. */
+  private readonly sprayRig = new THREE.Object3D()
+  private sprayPhase = 0
   private boatRef: BoatSystem | null = null
   private envBaker: { enabled: boolean; bakeAll(): void } | null = null
 
@@ -383,6 +392,7 @@ export class ProWater {
     p.applyWeatherRaw(0, 0)
 
     scene.add(p.boatProxy)
+    scene.add(p.sprayRig)
     return p
   }
 
@@ -439,12 +449,16 @@ export class ProWater {
       // caps and the first live tail rendered as a 100 m streak column.
       // heightFactor stays 0 (kills the double multiplication); tiny
       // scale factors let the 2× cap engage only on the hardest hits.
-      // tall narrow plume off the transom center — THE rooster tail
-      this.sprayTailId = this.water.spray.addEmitter(boat.group, {
+      // tall narrow plume off the transom center — THE rooster tail.
+      // Tail + corners mount on the CHURN RIG (see sprayRig above);
+      // probe heights sit so the rig's sweep carries them through the
+      // waterline every cycle even with the planing squat (~-0.3 m at
+      // the transom from bow-lift pitch).
+      this.sprayTailId = this.water.spray.addEmitter(this.sprayRig, {
         active: false, // planing gate flips it on (updateSpray)
         probes: [
-          { local: new THREE.Vector3(0, 0.2, -2.7) },
-          { local: new THREE.Vector3(0, 0.45, -2.75) },
+          { local: new THREE.Vector3(0, 0.35, -2.7) },
+          { local: new THREE.Vector3(0, 0.55, -2.75) },
         ],
         size: 3.2,
         stretchX: 0.5,
@@ -452,19 +466,24 @@ export class ProWater {
         opacity: 0.5,
         duration: 1.1,
         fadeOutTime: 0.55,
-        respawnTime: 0.22,
+        // thresholds LIVE-VERIFIED at speed: crossings of the displaced
+        // surface are mostly gentle (0.05-0.4 m/s) — 0.45 rejected nearly
+        // everything and the tail never lit. Near-zero threshold + short
+        // respawn = continuous plume; the planing gate (updateSpray)
+        // keeps it silent below 20 mph regardless.
+        respawnTime: 0.12,
         spawnJitterTime: 0.1,
         submersionDepth: 0.15,
-        velocityThreshold: 0.45,
+        velocityThreshold: 0.05,
         velocityScaleFactor: 0.08,
         velocityHeightFactor: 0,
       })
       // low wide fans off the transom corners
-      this.sprayCornersId = this.water.spray.addEmitter(boat.group, {
+      this.sprayCornersId = this.water.spray.addEmitter(this.sprayRig, {
         active: false,
         probes: [
-          { local: new THREE.Vector3(-0.75, 0.3, -2.45) },
-          { local: new THREE.Vector3(0.75, 0.3, -2.45) },
+          { local: new THREE.Vector3(-0.75, 0.42, -2.45) },
+          { local: new THREE.Vector3(0.75, 0.42, -2.45) },
         ],
         size: 2.6,
         stretchX: 1.9,
@@ -472,10 +491,10 @@ export class ProWater {
         opacity: 0.35,
         duration: 0.9,
         fadeOutTime: 0.45,
-        respawnTime: 0.3,
+        respawnTime: 0.15,
         spawnJitterTime: 0.18,
         submersionDepth: 0.15,
-        velocityThreshold: 0.5,
+        velocityThreshold: 0.08,
         velocityScaleFactor: 0.06,
         velocityHeightFactor: 0,
       })
@@ -618,6 +637,20 @@ export class ProWater {
         0,
         this.boatRef.group.position.z,
       )
+      // churn rig: ride the boat pose, then sweep the stern probes
+      // through the waterline while planing — peak vertical sweep speed
+      // ≈ 2π·2.2Hz·0.24m ≈ 3.3 m/s, well over the fire threshold, so
+      // every downward pass births a plume (see sprayRig field note)
+      const b = this.boatRef.group
+      this.sprayRig.position.copy(b.position)
+      this.sprayRig.quaternion.copy(b.quaternion)
+      const spd = Math.abs(this.boatRef.speed)
+      const churn = Math.min(1, Math.max(0, (spd - 8.9) / 18))
+      if (churn > 0) {
+        this.sprayPhase += rawDt * 2.2 * Math.PI * 2
+        this.sprayRig.position.y +=
+          (Math.sin(this.sprayPhase) * 0.24 - 0.18) * churn
+      }
     }
     // Wake foamPersistence is applied PER SIM STEP by the lib (raw
     // uniform multiply, one step per frame) — derive from RAW frame dt
