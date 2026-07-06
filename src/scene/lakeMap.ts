@@ -21,10 +21,20 @@ export const WATER_LEVEL = 0
  * Satoshi; the debugger minimap must always show this exact low-poly
  * ghost. Scaling happens HERE and only here: the raw GHOST_* definitions
  * are the canonical proportions, and every export is uniformly scaled,
- * so the world grows without the shape ever changing. 2.2x gives room
- * for several 150 mph laps without a shore in the way.
+ * so the world grows without the shape ever changing.
+ *
+ * 1.6x — THE SIZE VERDICT (user lap, 2026-07-06): 2.2 read as "too big,
+ * everything open and far away; the water overcompensating". 1.6 keeps
+ * full-throttle lap room while pulling the shores close enough that
+ * Water Pro's near-field detail (refraction, foam, spray, caustics)
+ * carries the frame.
+ *
+ * ?scale=1.8 still overrides for A/B laps — every consumer derives from
+ * this at module init, so the whole world rebuilds on reload.
  */
-export const LAKE_SCALE = 2.2
+const SCALE_PROBE = Number(new URLSearchParams(location.search).get('scale'))
+export const LAKE_SCALE =
+  SCALE_PROBE >= 1.2 && SCALE_PROBE <= 3 ? SCALE_PROBE : 1.6
 
 /** World-space square covered by the lake data texture, centered on origin. */
 export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)

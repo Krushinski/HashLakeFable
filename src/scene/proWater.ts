@@ -1,6 +1,12 @@
 import * as THREE from 'three/webgpu'
-import { WaterSystem, Sky as WaterProSky, getPresetParams } from '../threejs-water-pro'
+import {
+  WaterSystem,
+  Sky as WaterProSky,
+  getPresetParams,
+  QUALITY_LEVELS,
+} from '../threejs-water-pro'
 import { SkySystem, PRESETS as SKY_PRESETS } from '../threejs-sky-pro'
+import { LAKE_SCALE } from './lakeMap'
 import type { BoatSystem } from './boatSystem'
 
 /**
@@ -69,6 +75,9 @@ export class ProWater {
   readonly boatProxy: THREE.Mesh
   private bowWakeId = -1
   private sternWakeId = -1
+  private sprayTailId = -1
+  private sprayCornersId = -1
+  private lastSprayBand = -1
   private lastSkyBand = -1
   private lastWaveBand = -1
   /** Wake-field anchor: stand-in Object3D fed to WakeSystem so the 700 m
@@ -121,7 +130,26 @@ export class ProWater {
     console.log('[boot] sky:preset')
     await p.sky.applyPreset(SKY_PRESETS.partlyCloudy)
 
+    // Sky Pro bakes a 256² cloud-shadow map EVERY frame (65k texels × 8
+    // light steps of 3D noise) whose only consumers are god-rays and the
+    // cloudShadowFactor TSL helper — we wire up neither, so the bake is
+    // pure per-frame waste (~0.3-1 ms on the 3050). The setter's contract:
+    // false skips the bake and drives the enabled uniform so any receiver
+    // reads full sun. Re-enable if god rays ever land.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const skyPipeline = (p.sky as any).pipeline
+    if (skyPipeline?.cloudShadow) skyPipeline.cloudShadow.enabled = false
+
     console.log('[boot] water:create')
+    // Spray at medium: the tier ships sprayMaxParticles 0, which keeps
+    // the whole system unallocated (tryCreate treats the count as a
+    // boolean — the pool is a fixed 512 slots whenever it allocates, and
+    // it is WebGPU-only, which we are). The quality config is read BY
+    // REFERENCE at create time, so flipping the two spray fields here
+    // buys the rooster tail without touching any other medium setting
+    // (SSR steps, FFT res, mesh segments all stay medium).
+    QUALITY_LEVELS.medium.sprayMaxParticles = 512
+    QUALITY_LEVELS.medium.sprayEnabledByDefault = true
     // NOTE: deterministic fixed-substep mode measured 1 fps here (its
     // per-substep sync points serialize the GPU) — stability comes from
     // the dt clamp in update() instead: one sim step per frame, never
@@ -176,13 +204,15 @@ export class ProWater {
     // dusk's warm-brown atmospheric fog repaints the whole basin — pull
     // it back to a thin alpine haze. (The old 'startDistance'/'start'
     // guards silently no-oped for a week: the real properties are
-    // fadeStart/fadeEnd/fadePower.) Distances sized for the LAKE_SCALE
-    // world — the far shore sits ~4.5 km out now.
+    // fadeStart/fadeEnd/fadePower.) Distances RIDE LAKE_SCALE — they
+    // were tuned at 2.2 (far shore ~4.5 km) and must shrink with the
+    // world or the haze never reaches the near shores.
+    const FOG_S = LAKE_SCALE / 2.2
     p.water.fog.color = '#c4d2d8'
-    p.water.fog.fadeStart = 1400
-    p.water.fog.fadeEnd = 9000
+    p.water.fog.fadeStart = 1400 * FOG_S
+    p.water.fog.fadeEnd = 9000 * FOG_S
     p.water.fog.fadePower = 1.0
-    p.water.fog.skyBlendDistance = 4200
+    p.water.fog.skyBlendDistance = 4200 * FOG_S
 
     // ---- lake tuning pass 1 (verify live on pages.dev) ----
     // Wake field: dusk ships ocean physics — trail damping γ 0.25 and
@@ -217,11 +247,30 @@ export class ProWater {
     p.water.clipPlaneDistance = 0.05
     p.water.waterline.enabled = false
 
-    // Wake stays default-ON (?nowake for A/B). NOTE: spray is compiled
-    // out at medium tier (sprayMaxParticles 0) — the flag is kept for
-    // future higher tiers only.
+    // Wake stays default-ON (?nowake for A/B). Spray is now allocated at
+    // medium (see the QUALITY_LEVELS patch above create) — ?nospray
+    // skips its two compute dispatches for the A/B.
     p.water.wake.enabled = !flags.has('nowake')
     if (p.water.spray) p.water.spray.enabled = !flags.has('nospray')
+
+    // THE DARK-SMOKE PLUME root cause (decoded in-bundle): the vendor's
+    // RenderPassManager excludes the clipmap and sky from its aux passes
+    // but NEVER the spray mesh — every plume was baked into the
+    // scene-color texture the water samples for refraction, so the
+    // surface repainted a Beer-Lambert-tinted dark ghost of each plume
+    // while the direct white draw was z-culled below the waterline
+    // (water draws first at renderOrder -1 with depthWrite on). The
+    // depth pass also re-renders transparent meshes with a replacement
+    // material that lacks the spray's positionNode — 512 quads collapsed
+    // at the origin, feeding garbage to the fog composite. Exclude the
+    // spray mesh from both.
+    if (p.water.spray) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rpm = (p.water as any).renderPassManager
+      const sprayMesh = p.water.spray.getMesh()
+      rpm?.depthPass?.excludeObject?.(sprayMesh)
+      rpm?.sceneColorPass?.excludeObject?.(sprayMesh)
+    }
 
     // MOBILE-PARADOX root cause (verified in lib): WakeSystem anchors
     // its 700 m field at the camera-forward/ground hit (±350 m) and
@@ -260,7 +309,11 @@ export class ProWater {
     // BLACK texture: the second layer of near-field deadness, and why
     // refractionStrength appeared inert). Real refracted lakebed +
     // near-field reflections. ?nossr for the fps A/B.
-    if (!flags.has('nossr')) p.water.ssr.enabled = true
+    // NOTE (measured): the dusk preset ships ssr.enabled=true and
+    // loadPreset runs above, so the old `if (!nossr) enable` form left
+    // SSR ON under ?nossr — every past ?nossr A/B measured nothing. The
+    // flag must actively disable.
+    p.water.ssr.enabled = !flags.has('nossr')
 
     // ?nofog probe for the tan bottom-of-screen haze band (set at
     // create-time — post-build toggles black-screen)
@@ -286,6 +339,11 @@ export class ProWater {
     p.water.color.absorptionColor = '#8a4a26'
     p.water.color.transmissionColor = '#2e8574'
     p.water.color.waterColor = '#0d434e'
+    // Beer-Lambert depth normalization: loadPreset silently set this to
+    // the dusk OCEAN's 100 m — every depth-graded term (fallback columns,
+    // deep-water saturation) was stretched 4× past our basin. This lake
+    // bottoms out at 26 m.
+    p.water.color.waterDepth = 26
     p.water.fresnel.refractionStrength = 0.35
     p.water.fresnel.normalStrength = 1.25
 
@@ -329,16 +387,128 @@ export class ProWater {
     // Radii sized to the field: at medium the wake texture is 2.73 m per
     // texel — our old 1.6-1.9 m stamps were SUB-TEXEL (aliased injection,
     // broken-looking trail). Vendor default is radius 4 / depth 1.2.
-    if (!this.water.wake.enabled) return
-    this.bowWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.45,
-      radius: 3.5,
-      offset: new THREE.Vector3(0, 0, 2.3),
+    if (this.water.wake.enabled) {
+      this.bowWakeId = this.water.wake.addGenerator(boat.group, {
+        depth: 0.45,
+        radius: 3.5,
+        offset: new THREE.Vector3(0, 0, 2.3),
+      })
+      this.sternWakeId = this.water.wake.addGenerator(boat.group, {
+        depth: 0.9,
+        radius: 4.5,
+        offset: new THREE.Vector3(0, 0, -2.5),
+      })
+    }
+
+    // ---- stern spray rig (rooster tail) ----
+    // Three emitters, not one: updateEmitter never touches probe-authored
+    // overrides, so the probes stay bare and ALL tuning lives per-emitter
+    // — that's what lets updateSpray() retune each part with speed at
+    // runtime. Vendor defaults are ship-bow-on-ocean (size 27.5 m!);
+    // everything here is resized for a 6 m runabout. Probes sit at the
+    // waterline (group origin ≈ water level), local +Z = bow.
+    if (this.water.spray) {
+      // PROBE HEIGHTS (measured live, 150 mph): the spray gate fires only
+      // when a probe CROSSES the displaced surface from above. At planing
+      // trim the bow-lift pitch drops the transom ~0.3 m, so probes at the
+      // rest waterline ride permanently submerged — impact speeds read
+      // 1-10 m/s (threshold 0.45!) yet nothing ever fired. The probes must
+      // sit ABOVE the surface at speed, inside the band the waves + stern
+      // hump sweep through. Two tail probes at different heights keep one
+      // in the envelope across trim states.
+      // VELOCITY-FACTOR MATH (decoded in-bundle): sizeScale and
+      // heightScale are EACH `min(1 + factor·(impact − threshold), 2)`
+      // and they MULTIPLY on the height axis — planing impacts run
+      // 1-10 m/s with 14-47 m/s spikes, so factors ≥0.5 saturate both
+      // caps and the first live tail rendered as a 100 m streak column.
+      // heightFactor stays 0 (kills the double multiplication); tiny
+      // scale factors let the 2× cap engage only on the hardest hits.
+      // tall narrow plume off the transom center — THE rooster tail
+      this.sprayTailId = this.water.spray.addEmitter(boat.group, {
+        active: false, // planing gate flips it on (updateSpray)
+        probes: [
+          { local: new THREE.Vector3(0, 0.2, -2.7) },
+          { local: new THREE.Vector3(0, 0.45, -2.75) },
+        ],
+        size: 3.2,
+        stretchX: 0.5,
+        stretchY: 2.0,
+        opacity: 0.5,
+        duration: 1.1,
+        fadeOutTime: 0.55,
+        respawnTime: 0.22,
+        spawnJitterTime: 0.1,
+        submersionDepth: 0.15,
+        velocityThreshold: 0.45,
+        velocityScaleFactor: 0.08,
+        velocityHeightFactor: 0,
+      })
+      // low wide fans off the transom corners
+      this.sprayCornersId = this.water.spray.addEmitter(boat.group, {
+        active: false,
+        probes: [
+          { local: new THREE.Vector3(-0.75, 0.3, -2.45) },
+          { local: new THREE.Vector3(0.75, 0.3, -2.45) },
+        ],
+        size: 2.6,
+        stretchX: 1.9,
+        stretchY: 0.9,
+        opacity: 0.35,
+        duration: 0.9,
+        fadeOutTime: 0.45,
+        respawnTime: 0.3,
+        spawnJitterTime: 0.18,
+        submersionDepth: 0.15,
+        velocityThreshold: 0.5,
+        velocityScaleFactor: 0.06,
+        velocityHeightFactor: 0,
+      })
+      // bow cheeks: always armed but thresholded high — they only fire
+      // on real wave slams, so storm chop buys bow spray for free
+      this.water.spray.addEmitter(boat.group, {
+        probes: [
+          { local: new THREE.Vector3(-0.62, 0.05, 2.15) },
+          { local: new THREE.Vector3(0.62, 0.05, 2.15) },
+        ],
+        size: 3.2,
+        stretchX: 1.6,
+        stretchY: 1.1,
+        opacity: 0.5,
+        duration: 1.0,
+        fadeOutTime: 0.5,
+        respawnTime: 0.4,
+        spawnJitterTime: 0.15,
+        submersionDepth: 0.15,
+        velocityThreshold: 1.6,
+        velocityScaleFactor: 0.15,
+        velocityHeightFactor: 0,
+      })
+    }
+  }
+
+  /** Stern spray rides the throttle: off below planing (~20 mph), then
+   *  the tail grows/steepens with speed. Patched in coarse bands so the
+   *  per-frame cost is a comparison, not an emitter re-upload. */
+  private updateSpray(speedMps: number): void {
+    if (this.sprayTailId < 0 || !this.water.spray) return
+    const planing = speedMps > 8.9
+    const k = planing ? 1 - Math.exp(-(speedMps - 8.9) / 20) : 0
+    const band = planing ? 1 + Math.round(k * 7) : 0
+    if (band === this.lastSprayBand) return
+    this.lastSprayBand = band
+    // sized against the ~1.3-2× velocity sizeScale at planing impacts:
+    // top-speed tail ≈ 5.6 × 2.6 × 1.3-2 ≈ 19-29 m — dramatic, not a
+    // skyscraper (the first tune hit 100 m: see the factor note above)
+    this.water.spray.updateEmitter(this.sprayTailId, {
+      active: planing,
+      size: 3.2 + k * 2.4,
+      stretchY: 2.0 + k * 0.6,
+      opacity: 0.5 + k * 0.2,
     })
-    this.sternWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.9,
-      radius: 4.5,
-      offset: new THREE.Vector3(0, 0, -2.5),
+    this.water.spray.updateEmitter(this.sprayCornersId, {
+      active: planing,
+      size: 2.6 + k * 1.6,
+      opacity: 0.35 + k * 0.2,
     })
   }
 
@@ -349,6 +519,7 @@ export class ProWater {
    *  nothing worth simulating — without it the generators pump the field
    *  24/7 (endless rings + scratch streaks around a resting boat). */
   setBoatSpeed(speedMps: number): void {
+    this.updateSpray(speedMps)
     if (this.sternWakeId < 0) return
     const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)

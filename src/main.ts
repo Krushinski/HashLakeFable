@@ -5,7 +5,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { phasePillText } from './buildInfo'
 import { SkySystem } from './scene/skySystem'
 import { WaveField } from './scene/waveField'
-import { LAKE_SCALE } from './scene/lakeMap'
+import { LAKE_SCALE, waterDepth } from './scene/lakeMap'
 import { WaterSystem } from './scene/waterSystem'
 import { TerrainSystem } from './scene/terrainSystem'
 import { ForestSystem } from './scene/forestSystem'
@@ -41,9 +41,9 @@ const phasePill = document.getElementById('phase-pill') as HTMLDivElement
 const appHost = document.getElementById('app') as HTMLDivElement
 
 const bootStartedAt = performance.now()
-// v2: coordinates saved before the LAKE_SCALE world fork would restore
-// boats onto dry land — the key bump quietly retires them
-const TABLEAU_KEY = 'hashlake.tableau.v2'
+// v3: the 1.6× size verdict re-shaped the world again — the key bump
+// quietly retires 2.2-era poses (the afloat guard below catches the rest)
+const TABLEAU_KEY = 'hashlake.tableau.v3'
 
 function showFallback(reason: unknown): void {
   console.error('HashLake boot failed:', reason)
@@ -63,12 +63,14 @@ const TIER_VISUALS = {
   exposure: [0.5, 0.47, 0.43, 0.38, 0.33],
   sunIntensity: [2.2, 1.9, 1.4, 0.85, 0.55],
   fogColor: [0xcfdad2, 0xb9c4bf, 0x8a949a, 0x525c63, 0x4a2a20],
-  // scaled ~1.6x for the LAKE_SCALE world: the far shore now sits ~4.5km
-  // out — Serene keeps it visible through alpine haze, Apocalyptic still
-  // closes the world down
+  // anchored at the 2.2× world (far shore ~4.5 km) and rescaled below by
+  // FOG_WORLD — Serene keeps the far shore visible through alpine haze,
+  // Apocalyptic still closes the world down
   fogNear: [2700, 2400, 1900, 1450, 1100],
   fogFar: [9000, 8200, 6900, 5400, 4500],
 }
+/** Scene-fog distances ride the world size (anchors tuned at 2.2×). */
+const FOG_WORLD = LAKE_SCALE / 2.2
 
 function lerpAnchors(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
@@ -106,7 +108,7 @@ async function boot(): Promise<void> {
 
   // ---------- scene ----------
   const scene = new THREE.Scene()
-  scene.fog = new THREE.Fog(0xcfdad2, 2700, 9000)
+  scene.fog = new THREE.Fog(0xcfdad2, 2700 * FOG_WORLD, 9000 * FOG_WORLD)
 
   // legacy CPU wave field stays: boat steering approximations, splash
   // seating, buoys — the VISUAL water is Water Pro's FFT when USE_PRO
@@ -166,7 +168,9 @@ async function boot(): Promise<void> {
   // restore saved tableau
   try {
     const saved = JSON.parse(localStorage.getItem(TABLEAU_KEY) ?? 'null')
-    if (saved) {
+    // a tableau saved at one LAKE_SCALE can sit on dry land at another
+    // (?scale= probe laps) — only restore poses that are still afloat
+    if (saved && waterDepth(saved.x ?? 0, saved.z ?? 0) > 1) {
       boat.x = saved.x ?? boat.x
       boat.z = saved.z ?? boat.z
       boat.heading = saved.heading ?? boat.heading
@@ -460,8 +464,9 @@ async function boot(): Promise<void> {
       fog.color.lerp(new THREE.Color(0x3a140a), d.fireWeather * 0.6)
     }
     const staleCrush = 1 - d.fog * 0.82
-    fog.near = lerpAnchors(TIER_VISUALS.fogNear, t) * staleCrush
-    fog.far = lerpAnchors(TIER_VISUALS.fogFar, t) * Math.max(0.22, staleCrush)
+    fog.near = lerpAnchors(TIER_VISUALS.fogNear, t) * staleCrush * FOG_WORLD
+    fog.far =
+      lerpAnchors(TIER_VISUALS.fogFar, t) * Math.max(0.22, staleCrush) * FOG_WORLD
 
     clouds?.setMood(d.skyDark, 1 + d.rain * 0.3)
 
@@ -493,6 +498,7 @@ async function boot(): Promise<void> {
     sky,
     waveField,
     water,
+    pro,
     forest,
     camera,
     camRig,

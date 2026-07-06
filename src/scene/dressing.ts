@@ -224,13 +224,16 @@ export class LakeDressing {
    * with jitter, framed stringers, piles down to the bed, corner cleats.
    */
   private buildDock(): void {
-    const sz = 110
+    // seed coords ride LAKE_SCALE (post-fork bug: unscaled seeds left
+    // the dock stranded off-shore at any scale ≠ 1) — the west inlet
+    // blob lives at (-580·S, 110·S)
+    const sz = 110 * S
     // walk from open water toward land; stop at the water's edge, then
     // pull back so the first plank starts ON the beach. The inlet plus
     // shoreline wobble can run past -800 — march until we truly exit.
-    let sx = -585
-    for (let i = 0; i < 200 && shoreSdf(sx, sz) < 0; i++) sx -= 2
-    if (shoreSdf(sx, sz) < 0) sx = -760 // safety anchor
+    let sx = -585 * S
+    for (let i = 0; i < 400 && shoreSdf(sx, sz) < 0; i++) sx -= 2
+    if (shoreSdf(sx, sz) < 0) sx = -760 * S // safety anchor
     const startX = sx + 3 // slightly inland of the waterline
     const LEN = 22
     const deckY = 0.72

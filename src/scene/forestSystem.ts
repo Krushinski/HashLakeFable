@@ -111,10 +111,12 @@ export class ForestSystem {
       return true
     }
 
-    // hero specimens around the south shore (default tableau side)
-    tryPlace(-80, 762, 4, 400, true)
-    tryPlace(-350, 645, 4, 400, true)
-    tryPlace(560, 630, 4, 400, true)
+    // hero specimens around the south shore (default tableau side) —
+    // coords ride LAKE_SCALE (post-fork bug: three unscaled seeds fell
+    // in open water at 2.2× and the shoreSdf gate silently dropped them)
+    tryPlace(-80 * S, 762 * S, 4, 400 * S, true)
+    tryPlace(-350 * S, 645 * S, 4, 400 * S, true)
+    tryPlace(560 * S, 630 * S, 4, 400 * S, true)
     tryPlace(640 * S, 480 * S, 4, 400 * S, true)
 
     // scattered ring around the whole lake

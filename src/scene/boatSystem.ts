@@ -408,11 +408,17 @@ export class BoatSystem {
       this.camHeave + p.up,
       this.z - dirZ * p.back,
     )
+    // Never let the lens dip into the water: low presets ride ~2 m up,
+    // but heave dips + the stern wake hump at speed can put the displaced
+    // surface ABOVE the camera (Low Chase "swallowed" at 150 mph). The
+    // wake field peaks well under a meter, so a 1.5 m floor keeps the
+    // horizon dry through any combination of dip and hump.
+    targetPos.y = Math.max(targetPos.y, 1.5)
     const blend = 1 - Math.exp(-dt * 5.5)
     camera.position.lerp(targetPos, blend)
     camera.lookAt(
       this.x + dirX * p.lookAhead,
-      this.camHeave + p.lookUp,
+      Math.max(this.camHeave + p.lookUp, 0.6),
       this.z + dirZ * p.lookAhead,
     )
   }
