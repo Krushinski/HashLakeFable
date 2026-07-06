@@ -94,6 +94,96 @@ export function makeDetailNormalTexture(size = 256): THREE.DataTexture {
 }
 
 /**
+ * Tileable WHITE-SAND set: neutral speckle albedo (multiplier around 1.0
+ * so the palette hues stay authoritative) + a matching tangent-space
+ * normal map from the same height field — soft dune ripples with fine
+ * grain on top. Deterministic, seamless, zero assets (§user: "real sand
+ * albedo and normal textures").
+ */
+export function makeSandTextures(size = 512): {
+  albedo: THREE.DataTexture
+  normal: THREE.DataTexture
+} {
+  const dunes = makeOctaves(7, 2, 11, 313)
+  const grains = makeOctaves(10, 23, 96, 727)
+  // deterministic per-texel hash for the sub-texel grain speckle
+  const hash = (i: number, j: number): number => {
+    let h = (i * 374761393 + j * 668265263) ^ 0x5bf03635
+    h = Math.imul(h ^ (h >>> 13), 1274126177)
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295
+  }
+
+  const heights = new Float32Array(size * size)
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const u = i / size
+      const v = j / size
+      const dune = tileableHeight(u, v, dunes)
+      const rip = tileableHeight(u, v, grains)
+      const g = hash(i, j) * 2 - 1
+      heights[j * size + i] = dune * 0.52 + rip * 0.33 + g * 0.15
+    }
+  }
+
+  // albedo: luminance multiplier ~0.84..1.06, sparse darker grains
+  const alb = new Uint8Array(size * size * 4)
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const idx = (j * size + i) * 4
+      const h01 = heights[j * size + i] * 0.5 + 0.5
+      const g = hash(i + 7919, j + 104729)
+      let lum = 0.86 + h01 * 0.16 + (g - 0.5) * 0.08
+      if (g > 0.975) lum -= 0.22 // scattered dark grains / tiny pebbles
+      const b = Math.round(Math.min(255, Math.max(0, lum * 255)))
+      alb[idx] = b
+      alb[idx + 1] = b
+      alb[idx + 2] = Math.min(255, b + 2)
+      alb[idx + 3] = 255
+    }
+  }
+  const albedo = new THREE.DataTexture(alb, size, size)
+  albedo.wrapS = albedo.wrapT = THREE.RepeatWrapping
+  albedo.magFilter = THREE.LinearFilter
+  albedo.minFilter = THREE.LinearMipmapLinearFilter
+  albedo.generateMipmaps = true
+  albedo.anisotropy = 8
+  albedo.needsUpdate = true
+
+  // tangent-space normal from the same heights (standard RGB encoding)
+  const nrm = new Uint8Array(size * size * 4)
+  const strength = 2.4
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const l = heights[j * size + ((i - 1 + size) % size)]
+      const r = heights[j * size + ((i + 1) % size)]
+      const d = heights[((j - 1 + size) % size) * size + i]
+      const u2 = heights[((j + 1) % size) * size + i]
+      let nx = (l - r) * strength
+      let ny = (d - u2) * strength
+      let nz = 1
+      const len = Math.hypot(nx, ny, nz)
+      nx /= len
+      ny /= len
+      nz /= len
+      const idx = (j * size + i) * 4
+      nrm[idx] = Math.round((nx * 0.5 + 0.5) * 255)
+      nrm[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255)
+      nrm[idx + 2] = Math.round((nz * 0.5 + 0.5) * 255)
+      nrm[idx + 3] = 255
+    }
+  }
+  const normal = new THREE.DataTexture(nrm, size, size)
+  normal.wrapS = normal.wrapT = THREE.RepeatWrapping
+  normal.magFilter = THREE.LinearFilter
+  normal.minFilter = THREE.LinearMipmapLinearFilter
+  normal.generateMipmaps = true
+  normal.anisotropy = 8
+  normal.needsUpdate = true
+
+  return { albedo, normal }
+}
+
+/**
  * Tileable foam pattern — ridged, lacy structure in R, softer coverage in G.
  */
 export function makeFoamTexture(size = 256): THREE.DataTexture {

@@ -179,6 +179,11 @@ export class ProWater {
     // one half-res step into the surrounding water — the last layer of
     // the "fuzz around the hero" (§user). Costs ~1 ms.
     QUALITY_LEVELS.high.sceneColorResolutionScale = 1.0
+    // SSR at medium's march budget: our strength is 0.3 (speed-fading to
+    // 0.18) — 16 steps × 100 m buys nothing visible over 8 × 60 at that
+    // strength, and the march runs full-res every frame
+    QUALITY_LEVELS.high.ssrStepCount = 8
+    QUALITY_LEVELS.high.ssrMaxDistance = 60
     // NOTE: deterministic fixed-substep mode measured 1 fps here (its
     // per-substep sync points serialize the GPU) — stability comes from
     // the dt clamp in update() instead: one sim step per frame, never
@@ -464,6 +469,17 @@ export class ProWater {
     return p
   }
 
+  /** Drop an object from the water's scene-color re-render (refraction/
+   *  SSR source). Distant dressing — impostor forests, far ranges —
+   *  contributes nothing visible there but pays full vertex cost. */
+  excludeFromSceneColor(obj: THREE.Object3D): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpm = (this.water as any).renderPassManager
+    obj.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) rpm?.sceneColorPass?.excludeObject?.(o)
+    })
+  }
+
   /** Register the hull with the buoyancy + wake systems (after boat load). */
   attachBoat(boat: BoatSystem): void {
     this.boatRef = boat
@@ -732,18 +748,18 @@ export class ProWater {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const clouds = (this.sky as any).clouds
     if (clouds?.altitude?.value !== undefined) {
-      clouds.altitude.value = Math.max(clouds.altitude.value, 2300)
+      clouds.altitude.value = Math.max(clouds.altitude.value, 2700)
     }
   }
 
-  /** Advance both simulations. Water update is async (GPU readbacks). */
-  async update(dt: number): Promise<void> {
-    const rawDt = Math.min(dt, 0.1) // wall-clock dt, clamped only vs tab-switch spikes
-    // clamp the sim step to 60Hz-sized: 33ms steps STILL let the wake
-    // field self-amplify at 18 fps (user's mountain-trail screenshots).
-    // Below 60 fps the water runs proportionally slow-motion — stable
-    // and calm beats realtime and exploding.
-    dt = Math.min(dt, 1 / 60)
+  /** Per-frame sky tick — MUST run on every PRESENTED frame. The cloud
+   *  temporal reprojection accumulates history against the live camera;
+   *  when the async-water latch ran the sky at water cadence instead,
+   *  extreme camera moves left stale history stamped across the frame
+   *  ("seeing triple", §user). main.ts calls this synchronously each
+   *  rAF; the water sim below stays behind the latch. */
+  updateSky(dt: number): void {
+    dt = Math.min(dt, 1 / 30)
     this.sky.update(dt)
     // keep the water's sun/light in step with Sky Pro's sun
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -762,6 +778,17 @@ export class ProWater {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(this.wpSky as any).uploadSource(this.renderer)
     }
+  }
+
+  /** Advance the water simulation. Async (GPU readbacks) — runs behind
+   *  the main loop's latch; the sky ticks separately in updateSky(). */
+  async update(dt: number): Promise<void> {
+    const rawDt = Math.min(dt, 0.1) // wall-clock dt, clamped only vs tab-switch spikes
+    // clamp the sim step to 60Hz-sized: 33ms steps STILL let the wake
+    // field self-amplify at 18 fps (user's mountain-trail screenshots).
+    // Below 60 fps the water runs proportionally slow-motion — stable
+    // and calm beats realtime and exploding.
+    dt = Math.min(dt, 1 / 60)
     // keep the wake window riding the hull (see create(): wake anchor)
     if (this.boatRef) {
       this.wakeAnchor.position.set(

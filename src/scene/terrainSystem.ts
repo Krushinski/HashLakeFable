@@ -5,8 +5,11 @@ import {
   color,
   float,
   mix,
+  normalMap,
   positionLocal,
   smoothstep,
+  texture,
+  uv,
   varying,
   vec2,
   vec3,
@@ -14,6 +17,7 @@ import {
 } from 'three/tsl'
 import { fbm2, valueNoise2 } from '../core/noise'
 import { LAKE_SCALE, bedHeight, shoreSdf } from './lakeMap'
+import { makeSandTextures } from './proceduralTextures'
 
 /**
  * The land — from lakebed sand to hero peaks, one height function.
@@ -223,6 +227,8 @@ function farRangeHeight(x: number, z: number): number {
 }
 
 export class FarRanges {
+  readonly mesh!: THREE.Mesh
+
   constructor(scene: THREE.Scene) {
     // (mist bands RETIRED, last-day pass: the three translucent quads
     // read as a hard "cloud band" floating in front of the ranges at
@@ -262,6 +268,8 @@ export class FarRanges {
     })()
     const mesh = new THREE.Mesh(geo, material)
     scene.add(mesh)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(this as any).mesh = mesh
   }
 }
 
@@ -319,11 +327,26 @@ export class TerrainSystem {
     this.material.needsUpdate = true
   }
 
+  private static sandSet: ReturnType<typeof makeSandTextures> | null = null
+
   private buildGround(caustics: CausticsLike | null): void {
     const material = this.material
     const vShore = varying(float(0), 'vShoreDist')
     const vHeight = varying(float(0), 'vTerrainHeight')
     const vSlope = varying(float(0), 'vSlope')
+
+    // REAL SAND (§user): tileable procedural albedo + normal set, built
+    // once at boot. UVs span the plane 0..1 → scale to ~2.8 m tiles.
+    TerrainSystem.sandSet ??= makeSandTextures()
+    const sand = TerrainSystem.sandSet
+    const sandUV = uv().mul(DOMAIN / 2.8)
+    const sandUVMacro = uv().mul(DOMAIN / 13)
+    // sand zone: full on the bed and beach, gone by the grass line
+    const sandZone = float(1).sub(smoothstep(float(0.8), float(2.2), vHeight))
+    material.normalNode = normalMap(
+      texture(sand.normal, sandUV),
+      vec2(sandZone.mul(0.65)),
+    )
 
     material.positionNode = Fn(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -400,11 +423,18 @@ export class TerrainSystem {
       // meter of water read as RED at nadir (§user). Dry sand above the
       // line keeps its warmth.
       const bedCool = color(0xbfbaa6)
+      // sand grain: fine speckle × macro drift, neutral multiplier so
+      // the white palette stays authoritative
+      const sandGrain = texture(sand.albedo, sandUV)
+        .r.mul(texture(sand.albedo, sandUVMacro).r.mul(0.3).add(0.72))
+        .mul(1.08)
+
       let bed = mix(
         mix(bedSand, bedCool, smoothstep(float(0.05), float(0.9), depthM)),
         bedDeep,
         smoothstep(float(-2), float(-9), vHeight),
       )
+      bed = bed.mul(sandGrain)
       bed = bed.mul(ripples.mul(0.2).mul(rippleMask).add(1))
       // reef/rock patches — the dark cool blotches that give the demo's
       // top-down its structure against the white sand
@@ -418,7 +448,7 @@ export class TerrainSystem {
         dampSand,
         drySand,
         smoothstep(float(0.1), float(0.45), vHeight),
-      ).mul(grain.mul(0.1).add(0.95))
+      ).mul(sandGrain)
 
       // meadow: lush near shore, drier + patchier with altitude
       let grass = mix(

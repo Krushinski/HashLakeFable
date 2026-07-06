@@ -104,7 +104,7 @@ async function boot(): Promise<void> {
   // 11 fps on the 4K desktop): cap the render at ~2.4 MP — about
   // 1080p-and-a-half — and let the browser upscale. Slight softness on
   // huge monitors buys the frame rate back; small screens are untouched.
-  const PIXEL_BUDGET = 2.0e6
+  const PIXEL_BUDGET = 1.8e6
   const applyPixelBudget = () => {
     const base = Math.min(window.devicePixelRatio, USE_PRO ? 1.0 : 1.5)
     const px = window.innerWidth * window.innerHeight * base * base
@@ -129,7 +129,8 @@ async function boot(): Promise<void> {
   const water = USE_PRO ? null : new WaterSystem(scene, waveField, sky!)
   const terrain = new TerrainSystem(scene)
   const forest = new ForestSystem(scene)
-  forest.load().catch((err) => console.error('forest load failed:', err))
+  const forestReady = forest.load()
+  forestReady.catch((err) => console.error('forest load failed:', err))
   const clouds = USE_PRO ? null : new CloudSystem(scene)
   const boat = new BoatSystem(scene, waveField)
   const effects = new EffectsSystem(scene, waveField, boat)
@@ -141,7 +142,7 @@ async function boot(): Promise<void> {
   dressing.load().catch((err) => console.error('dressing load failed:', err))
   const speedo = new Speedometer()
   const lofi = new LofiRadio()
-  new FarRanges(scene)
+  const farRanges = new FarRanges(scene)
 
   sky?.bakeEnvironment()
 
@@ -169,6 +170,14 @@ async function boot(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (pro && !new URLSearchParams(location.search).has('nocaustics'))
     terrain.injectWaterNodes((pro.water.floor as any).caustics)
+  // scene-color pass diet: far dressing pays full vertex cost in the
+  // refraction re-render for zero visible contribution
+  if (pro) {
+    pro.excludeFromSceneColor(farRanges.mesh)
+    forestReady
+      .then(() => pro.excludeFromSceneColor(forest.group))
+      .catch(() => {})
+  }
   boat
     .load()
     .then(() => pro?.attachBoat(boat))
@@ -651,6 +660,10 @@ async function boot(): Promise<void> {
     // screen-space passes from the camera's CURRENT transform — running
     // it before the moves meant every pass lagged one frame behind)
     if (pro) {
+      // sky ticks EVERY presented frame — its temporal cloud history
+      // must track the live camera or fast moves stamp stale copies
+      // across the frame (the "seeing triple" regression)
+      pro.updateSky(dt)
       // proxy carries the hull footprint; Water Pro resolves its heave
       pro.boatProxy.position.x = boat.x
       pro.boatProxy.position.z = boat.z

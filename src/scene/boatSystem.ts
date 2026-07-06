@@ -102,8 +102,12 @@ export class BoatSystem {
   private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
-  /** Prop assembly (PropShaft/PropHub/PropBlade*) — spun with throttle. */
-  private readonly propMeshes: THREE.Mesh[] = []
+  /** Prop assembly (PropHub/PropBlade*) with each mesh's LOCAL shaft
+   *  axis resolved at load — spun with throttle about the true shaft. */
+  private readonly propMeshes: Array<{
+    mesh: THREE.Mesh
+    axis: THREE.Vector3
+  }> = []
   private ready = false
 
   constructor(
@@ -144,7 +148,7 @@ export class BoatSystem {
       // the running gear spins with throttle (§user) — blades + hub only;
       // the shaft is visually static and the rudder steers, not spins
       if (mesh.name.startsWith('PropBlade') || mesh.name === 'PropHub') {
-        this.propMeshes.push(mesh)
+        this.propMeshes.push({ mesh, axis: new THREE.Vector3(1, 0, 0) })
       }
     })
 
@@ -154,6 +158,23 @@ export class BoatSystem {
     const holder = new THREE.Group()
     holder.add(gltf.scene)
     this.group.add(holder)
+
+    // Resolve each prop mesh's LOCAL shaft axis (§user: the first guess
+    // spun blades like a ceiling fan — exporters bake arbitrary local
+    // frames). The shaft runs along the hull's length; express that
+    // world direction in each mesh's local frame at this instant and
+    // spin about THAT. Independent of authored axes forever after.
+    this.group.updateMatrixWorld(true)
+    const worldShaft = new THREE.Vector3(
+      Math.sin(this.heading),
+      0,
+      -Math.cos(this.heading),
+    )
+    const q = new THREE.Quaternion()
+    for (const p of this.propMeshes) {
+      p.mesh.getWorldQuaternion(q).invert()
+      p.axis.copy(worldShaft).applyQuaternion(q).normalize()
+    }
     this.ready = true
   }
 
@@ -395,12 +416,12 @@ export class BoatSystem {
       this.waveField.params.chopScale * 0.4
 
     // prop spin: revs follow throttle (idle tickover when moving at all,
-    // full churn at speed; reverses with reverse). Incremental rotation
-    // about each mesh's local shaft axis (authored bow -x → shaft = X).
+    // full churn at speed; reverses with reverse) — about each mesh's
+    // RESOLVED shaft axis, not a guessed authored axis
     if (this.propMeshes.length && Math.abs(this.speed) > 0.1) {
       const revs =
         (2.5 + Math.abs(this.speed) * 1.3) * Math.sign(this.speed) * dt
-      for (const m of this.propMeshes) m.rotateX(revs)
+      for (const p of this.propMeshes) p.mesh.rotateOnAxis(p.axis, revs)
     }
 
     void input
