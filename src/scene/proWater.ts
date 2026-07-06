@@ -41,9 +41,12 @@ const WATER_TIERS = {
 }
 
 /** FFT cascade tiles, lake-scaled (dusk ships 2642 m / 241 m — ocean fetch).
- *  Order invariant: cascade 0 (waves) must stay larger than 1 (ripples). */
+ *  Order invariant: cascade 0 (waves) must stay larger than 1 (ripples).
+ *  NOTE (verified in lib): effective world tile = scale * resolution/256,
+ *  so at medium (cascade0 res 128) a config of 840 tiles the world every
+ *  420 m — the value below is pre-compensated. Ripples (res 256) are 1:1. */
 const CASCADES = {
-  waves: { scale: 420, amplitudeScale: 0.2 },
+  waves: { scale: 840, amplitudeScale: 0.2 },
   ripples: { scale: 90, amplitudeScale: 0.083 },
 }
 
@@ -171,15 +174,15 @@ export class ProWater {
     p.water.lighting.hemisphereLight.intensity = 0.85
 
     // dusk's warm-brown atmospheric fog repaints the whole basin — pull
-    // it back to a thin alpine haze
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fog = p.water.fog as any
-    fog.color = '#c4d2d8'
-    if ('startDistance' in fog) fog.startDistance = 900
-    if ('start' in fog) fog.start = 900
-    if ('endDistance' in fog) fog.endDistance = 5200
-    if ('end' in fog) fog.end = 5200
-    fog.skyBlendDistance = 2600
+    // it back to a thin alpine haze. (The old 'startDistance'/'start'
+    // guards silently no-oped for a week: the real properties are
+    // fadeStart/fadeEnd/fadePower.) Distances sized for the LAKE_SCALE
+    // world — the far shore sits ~4.5 km out now.
+    p.water.fog.color = '#c4d2d8'
+    p.water.fog.fadeStart = 1400
+    p.water.fog.fadeEnd = 9000
+    p.water.fog.fadePower = 1.0
+    p.water.fog.skyBlendDistance = 4200
 
     // ---- lake tuning pass 1 (verify live on pages.dev) ----
     // Wake field: dusk ships ocean physics — trail damping γ 0.25 and
@@ -194,8 +197,11 @@ export class ProWater {
     // decay must be stiffer than real-lake values for trails to die on
     // a human timescale
     p.water.wake.friction = 0.9
-    p.water.wake.foamStrength = 0.7
-    p.water.wake.foamBreakThreshold = 0.2
+    // Visible-wake tune (verified against the sim's gating math): the
+    // dt-clamped sim runs ~40% speed at 25fps and rarely reaches 0.2
+    // steepness, which is why the old trail was near-invisible.
+    p.water.wake.foamStrength = 1.0
+    p.water.wake.foamBreakThreshold = 0.08
 
     // Nobody dives in this game — and the underwater pass is what
     // painted the teal band across the screen bottom whenever a camera
@@ -231,11 +237,30 @@ export class ProWater {
       p.water.wake.setCamera(p.wakeAnchor as unknown as THREE.Camera)
     }
 
-    // Crest-foam accumulation EXONERATED for the X/streaks (exact-texel
-    // bounds-checked window copy — cannot smear; and dusk ships it
-    // disabled, so it never even ran). Kept OFF while the X attribution
-    // A/B runs; Deploy B turns it on for real whitecaps.
-    p.water.foam.waves.enabled = false
+    // Crest-foam accumulation: EXONERATED (exact-texel bounds-checked
+    // window copy — cannot smear; dusk even ships it disabled). ON now:
+    // real whitecaps at storm tiers, richer wake interplay.
+    p.water.foam.waves.enabled = !flags.has('nocrestfoam')
+
+    // THE BANNER / NADIR VOID / STREAK-ZONE root cause (endgame sweep,
+    // verified in-bundle): shoreline foam's zone mask multiplies water
+    // COLOR AND ALPHA by (1 - mask), and dusk ships range 35 — water
+    // went fully transparent wherever the view-depth column dropped
+    // below ~17.5 m. Bottom-of-frame pixels ALWAYS have a thin column,
+    // so a bed-colored band followed the camera everywhere; at nadir
+    // the whole lake (< 17.5 m deep) rendered as naked bed with the
+    // foam texture as pale streak lines. range 4 = the water only
+    // clears in the last ~2 m of column at the true beach edge — a
+    // legible waterline instead of a vanishing lake.
+    p.water.foam.shoreline.range = 4
+
+    // SSR: the medium-tier clamp only runs at create — a post-create
+    // enable STICKS, and it also turns on the scene-color pass that
+    // above-water refraction reads (it was sampling a never-rendered
+    // BLACK texture: the second layer of near-field deadness, and why
+    // refractionStrength appeared inert). Real refracted lakebed +
+    // near-field reflections. ?nossr for the fps A/B.
+    if (!flags.has('nossr')) p.water.ssr.enabled = true
 
     // ?nofog probe for the tan bottom-of-screen haze band (set at
     // create-time — post-build toggles black-screen)
@@ -267,12 +292,10 @@ export class ProWater {
     p.water.rain.particles.enabled = flags.has('rain')
     p.water.rain.ripples.enabled = flags.has('rain')
 
-    // STREAK-LINE PROBES: SSR + screen-space refraction are compiled
-    // OFF at medium and spray never ran — surviving suspects are
-    // sparkle (view-dependent, only ever distance-limited) and the two
-    // remaining foam layers. All create-time-safe flags:
+    // Sparkle exonerated for the streaks (they were the shoreline zone
+    // + clipmap strips) — near-field glints restored to the dusk default.
     p.water.sparkle.enabled = !flags.has('nosparkle')
-    p.water.sparkle.minDistance = 40
+    p.water.sparkle.minDistance = 0
     if (flags.has('nosurfacefoam')) p.water.foam.surface.enabled = false
     if (flags.has('noshorefoam')) p.water.foam.shoreline.enabled = false
 
@@ -303,12 +326,12 @@ export class ProWater {
     // broken-looking trail). Vendor default is radius 4 / depth 1.2.
     if (!this.water.wake.enabled) return
     this.bowWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.35,
+      depth: 0.45,
       radius: 3.5,
       offset: new THREE.Vector3(0, 0, 2.3),
     })
     this.sternWakeId = this.water.wake.addGenerator(boat.group, {
-      depth: 0.6,
+      depth: 0.9,
       radius: 4.5,
       offset: new THREE.Vector3(0, 0, -2.5),
     })
@@ -325,11 +348,11 @@ export class ProWater {
     const idle = Math.min(1, Math.max(0, speedMps - 0.3) / 2.5)
     const k = 1 - Math.exp(-speedMps / 14)
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.45 + k * 0.55) * idle,
+      depth: (0.7 + k * 0.7) * idle,
       radius: 4.5 + k * 1.5,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: (0.3 + k * 0.3) * idle,
+      depth: (0.45 + k * 0.35) * idle,
       radius: 3.5 + k * 1.0,
     })
   }
@@ -405,12 +428,12 @@ export class ProWater {
       )
     }
     // Wake foamPersistence is applied PER SIM STEP by the lib (raw
-    // uniform multiply, one step per frame) — so trail lifetime used to
-    // scale with fps (~2.5x too long at 24fps). Derive it from RAW
-    // frame dt: 0.9^60 ≈ 0.0018 per wall-second reproduces the tuned
-    // 60fps look at any frame rate. Pure uniform write, safe per-frame.
+    // uniform multiply, one step per frame) — derive from RAW frame dt
+    // for an fps-independent trail. 0.02^dt ≈ a ~4s visible foam wake
+    // (the 0.0018 value killed the trail in ~2s: 'no foam off the
+    // stern'); friction 0.9 remains the stability backstop.
     if (this.sternWakeId >= 0) {
-      this.water.wake.foamPersistence = Math.pow(0.0018, rawDt)
+      this.water.wake.foamPersistence = Math.pow(0.02, rawDt)
     }
     await this.water.update(dt)
   }

@@ -5,6 +5,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { phasePillText } from './buildInfo'
 import { SkySystem } from './scene/skySystem'
 import { WaveField } from './scene/waveField'
+import { LAKE_SCALE } from './scene/lakeMap'
 import { WaterSystem } from './scene/waterSystem'
 import { TerrainSystem } from './scene/terrainSystem'
 import { ForestSystem } from './scene/forestSystem'
@@ -40,7 +41,9 @@ const phasePill = document.getElementById('phase-pill') as HTMLDivElement
 const appHost = document.getElementById('app') as HTMLDivElement
 
 const bootStartedAt = performance.now()
-const TABLEAU_KEY = 'hashlake.tableau.v1'
+// v2: coordinates saved before the LAKE_SCALE world fork would restore
+// boats onto dry land — the key bump quietly retires them
+const TABLEAU_KEY = 'hashlake.tableau.v2'
 
 function showFallback(reason: unknown): void {
   console.error('HashLake boot failed:', reason)
@@ -60,8 +63,11 @@ const TIER_VISUALS = {
   exposure: [0.5, 0.47, 0.43, 0.38, 0.33],
   sunIntensity: [2.2, 1.9, 1.4, 0.85, 0.55],
   fogColor: [0xcfdad2, 0xb9c4bf, 0x8a949a, 0x525c63, 0x4a2a20],
-  fogNear: [1700, 1500, 1200, 900, 700],
-  fogFar: [5600, 5100, 4300, 3400, 2800],
+  // scaled ~1.6x for the LAKE_SCALE world: the far shore now sits ~4.5km
+  // out — Serene keeps it visible through alpine haze, Apocalyptic still
+  // closes the world down
+  fogNear: [2700, 2400, 1900, 1450, 1100],
+  fogFar: [9000, 8200, 6900, 5400, 4500],
 }
 
 function lerpAnchors(arr: number[], t: number): number {
@@ -100,7 +106,7 @@ async function boot(): Promise<void> {
 
   // ---------- scene ----------
   const scene = new THREE.Scene()
-  scene.fog = new THREE.Fog(0xcfdad2, 1700, 5600)
+  scene.fog = new THREE.Fog(0xcfdad2, 2700, 9000)
 
   // legacy CPU wave field stays: boat steering approximations, splash
   // seating, buoys — the VISUAL water is Water Pro's FFT when USE_PRO
@@ -135,7 +141,7 @@ async function boot(): Promise<void> {
     46,
     window.innerWidth / window.innerHeight,
     0.3,
-    12000,
+    24000,
   )
   // Water Pro + Sky Pro — created after the camera exists; the boat
   // registers with buoyancy/wake once its GLB is in
@@ -148,8 +154,8 @@ async function boot(): Promise<void> {
   // Boat spawns at (40, 420); camera sits ~50m behind so the runabout
   // rides the bottom third of the frame with the range beyond.
   const camRig = {
-    pos: new THREE.Vector3(40, 6.5, 470),
-    look: new THREE.Vector3(28, 21, -700),
+    pos: new THREE.Vector3(40 * LAKE_SCALE, 6.5, 470 * LAKE_SCALE),
+    look: new THREE.Vector3(28 * LAKE_SCALE, 21, -700 * LAKE_SCALE),
     drift: 1,
   }
   const curLook = new THREE.Vector3().copy(camRig.look)
@@ -316,8 +322,8 @@ async function boot(): Promise<void> {
       toast.show('Tableau saved')
     }
     if (e.key === 'r' || e.key === 'R') {
-      camRig.pos.set(40, 6.5, 470)
-      camRig.look.set(28, 21, -700)
+      camRig.pos.set(40 * LAKE_SCALE, 6.5, 470 * LAKE_SCALE)
+      camRig.look.set(28 * LAKE_SCALE, 21, -700 * LAKE_SCALE)
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
@@ -521,6 +527,15 @@ async function boot(): Promise<void> {
   // ghosting" on turns, the mobile hat double-image, and a large share
   // of the drive jitter. The guard makes overlapping callbacks no-ops.
   let frameBusy = false
+
+  // vendor-recommended (docs/guide/basic-example): precompile the scene's
+  // shaders before the first frame instead of hitching through async
+  // pipeline compiles during the opening seconds
+  try {
+    await renderer.compileAsync(scene, camera)
+  } catch {
+    /* fall through — compiles lazily as before */
+  }
 
   renderer.setAnimationLoop(async () => {
     if (frameBusy) return

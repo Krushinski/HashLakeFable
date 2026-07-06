@@ -2,8 +2,10 @@ import * as THREE from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { seededRandom } from '../core/noise'
-import { shoreSdf } from './lakeMap'
+import { LAKE_SCALE, shoreSdf } from './lakeMap'
 import { terrainHeight } from './terrainSystem'
+
+const S = LAKE_SCALE
 
 /**
  * The forest — hero baked-GLB trees near the camera, instanced LOD variants
@@ -113,12 +115,12 @@ export class ForestSystem {
     tryPlace(-80, 762, 4, 400, true)
     tryPlace(-350, 645, 4, 400, true)
     tryPlace(560, 630, 4, 400, true)
-    tryPlace(640, 480, 4, 400, true)
+    tryPlace(640 * S, 480 * S, 4, 400 * S, true)
 
     // scattered ring around the whole lake
-    for (let i = 0; i < 3400 && slots.length < 310; i++) {
+    for (let i = 0; i < 8000 && slots.length < 520; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = 500 + rand() * 700
+      const rad = (500 + rand() * 700) * S
       tryPlace(Math.sin(ang) * rad, Math.cos(ang) * rad * 0.92 + 40, 10, 320)
     }
 
@@ -201,13 +203,13 @@ export class ForestSystem {
 
     interface ImpSlot { x: number; z: number; scale: number; rot: number }
     const impSlots: ImpSlot[] = []
-    for (let i = 0; i < 24000 && impSlots.length < 4600; i++) {
+    for (let i = 0; i < 60000 && impSlots.length < 10000; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = 640 + rand() * 1500
+      const rad = (640 + rand() * 1500) * S
       const x = Math.sin(ang) * rad
-      const z = Math.cos(ang) * rad * 0.92 + 40
+      const z = Math.cos(ang) * rad * 0.92 + 40 * S
       const s = shoreSdf(x, z)
-      if (s < 50 || s > 1200) continue
+      if (s < 50 || s > 1200 * S) continue
       const h = terrainHeight(x, z)
       if (h > 140) continue // hug the lake bowl — high trees read as ants
       let ok = true

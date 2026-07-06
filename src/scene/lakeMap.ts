@@ -16,8 +16,18 @@ import { fbm2 } from '../core/noise'
 
 export const WATER_LEVEL = 0
 
+/**
+ * World scale. The ghost-in-a-sheet silhouette below is CANON — a nod to
+ * Satoshi; the debugger minimap must always show this exact low-poly
+ * ghost. Scaling happens HERE and only here: the raw GHOST_* definitions
+ * are the canonical proportions, and every export is uniformly scaled,
+ * so the world grows without the shape ever changing. 2.2x gives room
+ * for several 150 mph laps without a shore in the way.
+ */
+export const LAKE_SCALE = 2.2
+
 /** World-space square covered by the lake data texture, centered on origin. */
-export const LAKE_TEX_WORLD_SIZE = 2048
+export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)
 
 export const MAX_LAKE_DEPTH = 26
 
@@ -28,8 +38,8 @@ interface Blob {
   rz: number
 }
 
-/** Organic lake body = smooth union of overlapping rounded shapes. */
-const LAKE_BLOBS: Blob[] = [
+/** THE GHOST (canonical proportions — never edit scale here, edit LAKE_SCALE). */
+const GHOST_BLOBS: Blob[] = [
   { cx: 0, cz: 40, rx: 640, rz: 460 }, // main body
   { cx: -140, cz: -430, rx: 260, rz: 240 }, // north bay toward the mountain gateway
   { cx: 560, cz: 190, rx: 250, rz: 200 }, // east cove
@@ -40,15 +50,31 @@ const LAKE_BLOBS: Blob[] = [
   { cx: -430, cz: 360, rx: 200, rz: 150 },
 ]
 
+/** Organic lake body = smooth union of overlapping rounded shapes (scaled). */
+const LAKE_BLOBS: Blob[] = GHOST_BLOBS.map((b) => ({
+  cx: b.cx * LAKE_SCALE,
+  cz: b.cz * LAKE_SCALE,
+  rx: b.rx * LAKE_SCALE,
+  rz: b.rz * LAKE_SCALE,
+}))
+
 /** Landmark features that shape the lake bed. */
 // island: cubic-falloff plateau (a peaked gaussian left it a 38 m
-// marshmallow) — landR is where the bed crosses the waterline
-export const ISLAND = { cx: -235, cz: 305, r: 155, crest: 3.6, landR: 74 }
+// marshmallow) — landR is where the bed crosses the waterline.
+// crest heights stay in absolute meters: the world grows sideways,
+// not upward.
+export const ISLAND = {
+  cx: -235 * LAKE_SCALE,
+  cz: 305 * LAKE_SCALE,
+  r: 155 * LAKE_SCALE,
+  crest: 3.6,
+  landR: 74 * LAKE_SCALE,
+}
 export const SANDBAR = {
-  cx: 230,
-  cz: 360,
-  rx: 160,
-  rz: 60,
+  cx: 230 * LAKE_SCALE,
+  cz: 360 * LAKE_SCALE,
+  rx: 160 * LAKE_SCALE,
+  rz: 60 * LAKE_SCALE,
   rot: -0.35,
   crest: 0.9,
 }
@@ -76,7 +102,10 @@ function smoothMin(a: number, b: number, k: number): number {
 export function shoreSdf(x: number, z: number): number {
   let d = Infinity
   for (const b of LAKE_BLOBS) {
-    d = d === Infinity ? blobSdf(x, z, b) : smoothMin(d, blobSdf(x, z, b), 110)
+    d =
+      d === Infinity
+        ? blobSdf(x, z, b)
+        : smoothMin(d, blobSdf(x, z, b), 110 * LAKE_SCALE)
   }
   // Organic shoreline wobble — large slow undulation + finer nibbling.
   const wobble =
@@ -129,8 +158,9 @@ function gaussianBump(
 export function bedHeight(x: number, z: number): number {
   const sdf = shoreSdf(x, z)
 
-  // Base basin: bed drops from the shoreline toward max depth mid-lake.
-  const t = Math.min(1, Math.max(0, -sdf / 290))
+  // Base basin: bed drops from the shoreline toward max depth mid-lake
+  // (shelf width scales with the world so beach grading stays proportional).
+  const t = Math.min(1, Math.max(0, -sdf / (290 * LAKE_SCALE)))
   let bed = -MAX_LAKE_DEPTH * Math.pow(t, 1.2)
 
   // Gentle bed relief so the shallows aren't a perfect ramp.
@@ -186,7 +216,7 @@ export interface LakeTextures {
  * Bakes depth + shore-distance into a texture the water shader samples.
  * Generated once at boot; deterministic.
  */
-export function buildLakeTextures(size = 512): LakeTextures {
+export function buildLakeTextures(size = 1024): LakeTextures {
   const data = new Float32Array(size * size * 2)
   const half = LAKE_TEX_WORLD_SIZE / 2
   for (let j = 0; j < size; j++) {

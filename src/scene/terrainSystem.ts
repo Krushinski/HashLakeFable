@@ -13,7 +13,7 @@ import {
   mx_noise_float,
 } from 'three/tsl'
 import { fbm2, valueNoise2 } from '../core/noise'
-import { bedHeight, shoreSdf } from './lakeMap'
+import { LAKE_SCALE, bedHeight, shoreSdf } from './lakeMap'
 
 /**
  * The land — from lakebed sand to hero peaks, one height function.
@@ -28,8 +28,11 @@ import { bedHeight, shoreSdf } from './lakeMap'
  * disagree.
  */
 
-const DOMAIN = 5120
-const CELLS = 528
+// World grows with the ghost (see lakeMap.LAKE_SCALE): domain and every
+// ridge POSITION scale sideways; heights stay in absolute meters.
+const S = LAKE_SCALE
+const DOMAIN = Math.round(5120 * S)
+const CELLS = 640
 
 interface Ridge {
   x1: number
@@ -41,11 +44,21 @@ interface Ridge {
   r: number // half-width of the ridge flank
 }
 
+const scaleRidges = (ridges: Ridge[]): Ridge[] =>
+  ridges.map((rg) => ({
+    ...rg,
+    x1: rg.x1 * S,
+    z1: rg.z1 * S,
+    x2: rg.x2 * S,
+    z2: rg.z2 * S,
+    r: rg.r * S,
+  }))
+
 /**
  * The hero range as connected RIDGE SEGMENTS — mountains are chains with
  * saddles and sharp crests, never radial gumdrops (§11.3).
  */
-const RIDGES: Ridge[] = [
+const RIDGES: Ridge[] = scaleRidges([
   // centerpiece massif: steep pyramid with shoulders
   { x1: -420, z1: -1720, h1: 520, x2: -120, z2: -1880, h2: 820, r: 340 },
   { x1: -120, z1: -1880, h1: 820, x2: 260, z2: -1760, h2: 560, r: 320 },
@@ -58,7 +71,7 @@ const RIDGES: Ridge[] = [
   // far back-range: taller, hazier, filling the horizon gaps
   { x1: -700, z1: -2350, h1: 760, x2: 60, z2: -2450, h2: 900, r: 480 },
   { x1: 60, z1: -2450, h1: 900, x2: 800, z2: -2250, h2: 700, r: 440 },
-]
+])
 
 function ridgedNoise(x: number, z: number, seed: number): number {
   let amp = 1
@@ -143,7 +156,7 @@ export function terrainHeight(x: number, z: number): number {
     Math.min(1, Math.max(0, (sdf - 25) / 120))
 
   // Foothills climbing toward the north range.
-  const north = Math.min(1, Math.max(0, (-z - 620) / 900))
+  const north = Math.min(1, Math.max(0, (-z - 620 * S) / (900 * S)))
   h += north * north * 130
   h +=
     north *
@@ -155,8 +168,8 @@ export function terrainHeight(x: number, z: number): number {
   h = Math.max(h, mountainHeight(x, z))
 
   // Rolling rises on the other sides so the basin feels cradled.
-  const radial = Math.hypot(x, z - 40)
-  const edge = Math.min(1, Math.max(0, (radial - 1350) / 1000))
+  const radial = Math.hypot(x, z - 40 * S)
+  const edge = Math.min(1, Math.max(0, (radial - 1350 * S) / (1000 * S)))
   const southish = Math.max(0, z / Math.max(radial, 1))
   h += edge * edge * (55 + 60 * southish) *
     (0.7 + 0.6 * fbm2(x * 0.0016, z * 0.0016, { octaves: 3, seed: 99 }))
@@ -170,7 +183,7 @@ export function terrainHeight(x: number, z: number): number {
  * hazed by fog into aerial-perspective silhouettes. North wall + east and
  * west spurs; the south stays open to breathe.
  */
-const FAR_RIDGES: Ridge[] = [
+const FAR_RIDGES: Ridge[] = scaleRidges([
   { x1: -2900, z1: -3400, h1: 760, x2: -900, z2: -3750, h2: 1120, r: 950 },
   { x1: -900, z1: -3750, h1: 1120, x2: 1500, z2: -3500, h2: 880, r: 900 },
   { x1: 2300, z1: -2600, h1: 640, x2: 3600, z2: -1500, h2: 430, r: 760 },
@@ -181,7 +194,7 @@ const FAR_RIDGES: Ridge[] = [
   { x1: -3500, z1: 300, h1: 560, x2: -2700, z2: 1700, h2: 410, r: 700 },
   { x1: 1900, z1: 2700, h1: 300, x2: 3300, z2: 1800, h2: 440, r: 640 },
   { x1: -2400, z1: 2600, h1: 340, x2: -1300, z2: 3100, h2: 260, r: 600 },
-]
+])
 
 function farRangeHeight(x: number, z: number): number {
   let h = 0
@@ -219,12 +232,12 @@ export class FarRanges {
     ]) {
       const m = mist.clone()
       m.opacity = op
-      const band = new THREE.Mesh(new THREE.PlaneGeometry(8200, h), m)
-      band.position.set(0, y, z)
+      const band = new THREE.Mesh(new THREE.PlaneGeometry(8200 * S, h), m)
+      band.position.set(0, y, z * S)
       band.renderOrder = 12
       scene.add(band)
     }
-    const geo = new THREE.PlaneGeometry(9000, 9000, 160, 160)
+    const geo = new THREE.PlaneGeometry(9000 * S, 9000 * S, 160, 160)
     geo.rotateX(-Math.PI / 2)
     const pos = geo.attributes.position as THREE.BufferAttribute
     for (let i = 0; i < pos.count; i++) {

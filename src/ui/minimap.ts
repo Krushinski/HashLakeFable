@@ -1,4 +1,4 @@
-import { shoreSdf, ISLAND, SANDBAR } from '../scene/lakeMap'
+import { LAKE_SCALE, shoreSdf, ISLAND, SANDBAR } from '../scene/lakeMap'
 import type { BoatSystem } from '../scene/boatSystem'
 
 /**
@@ -10,11 +10,12 @@ import type { BoatSystem } from '../scene/boatSystem'
 
 const W = 356
 const H = 313
-// world window, uniform scale (0.187 px/m)
-const X0 = -950
-const X1 = 950
-const Z0 = -830
-const Z1 = 840
+// world window, uniform scale — tracks LAKE_SCALE so the ghost fills
+// the map identically at any world size (the silhouette is canon)
+const X0 = -950 * LAKE_SCALE
+const X1 = 950 * LAKE_SCALE
+const Z0 = -830 * LAKE_SCALE
+const Z1 = 840 * LAKE_SCALE
 
 const px = (x: number) => ((x - X0) / (X1 - X0)) * (W - 1)
 const pz = (z: number) => ((z - Z0) / (Z1 - Z0)) * (H - 1)
@@ -27,9 +28,9 @@ interface Marker {
 }
 
 const MARKERS: Marker[] = [
-  { x: 560, z: 190, label: 'COVE', color: 'rgba(111,252,232,0.8)' },
-  { x: -585, z: 110, label: 'DOCK', color: 'rgba(111,252,232,0.8)' },
-  { x: -140, z: -430, label: 'NORTH BAY', color: 'rgba(111,252,232,0.8)' },
+  { x: 560 * LAKE_SCALE, z: 190 * LAKE_SCALE, label: 'COVE', color: 'rgba(111,252,232,0.8)' },
+  { x: -585 * LAKE_SCALE, z: 110 * LAKE_SCALE, label: 'DOCK', color: 'rgba(111,252,232,0.8)' },
+  { x: -140 * LAKE_SCALE, z: -430 * LAKE_SCALE, label: 'NORTH BAY', color: 'rgba(111,252,232,0.8)' },
   { x: ISLAND.cx, z: ISLAND.cz, label: 'ISLAND', color: 'rgba(196,220,150,0.85)' },
   { x: SANDBAR.cx, z: SANDBAR.cz, label: 'SANDBAR', color: 'rgba(222,206,160,0.8)' },
 ]

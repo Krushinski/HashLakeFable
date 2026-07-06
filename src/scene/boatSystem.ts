@@ -3,7 +3,7 @@ import { Fn, positionLocal, sin, uniform } from 'three/tsl'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import type { WaveField } from './waveField'
-import { shoreSdf, waterDepth } from './lakeMap'
+import { LAKE_SCALE, shoreSdf, waterDepth } from './lakeMap'
 
 /**
  * The hero runabout + Drive Mode physics (§6.2).
@@ -85,8 +85,8 @@ export class BoatSystem {
   readonly group = new THREE.Group()
 
   // physics state — heading is the source of truth
-  x = 40
-  z = 420
+  x = 40 * LAKE_SCALE
+  z = 420 * LAKE_SCALE
   heading = 0 // 0 = facing north (-z), toward the hero range
   speed = 0
 

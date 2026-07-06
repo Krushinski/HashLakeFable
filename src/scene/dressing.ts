@@ -2,9 +2,11 @@ import * as THREE from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { seededRandom } from '../core/noise'
-import { ISLAND, bedHeight, shoreSdf } from './lakeMap'
+import { ISLAND, LAKE_SCALE, bedHeight, shoreSdf } from './lakeMap'
 import { terrainHeight } from './terrainSystem'
 import type { WaveField } from './waveField'
+
+const S = LAKE_SCALE
 
 /**
  * Lake dressing — the destination spots made physical (§10.2 + user):
@@ -128,7 +130,7 @@ export class LakeDressing {
     }
     for (let i = 0; i < 1500 && shoreRocks.length < 68; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = 480 + rand() * 520
+      const rad = (480 + rand() * 520) * S
       const x = Math.sin(ang) * rad
       const z = Math.cos(ang) * rad * 0.92 + 40
       const s = shoreSdf(x, z)
@@ -191,7 +193,7 @@ export class LakeDressing {
     const bushSlots: { x: number; z: number; s: number }[] = []
     for (let i = 0; i < 3200 && bushSlots.length < 250; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = 470 + rand() * 560
+      const rad = (470 + rand() * 560) * S
       const x = Math.sin(ang) * rad
       const z = Math.cos(ang) * rad * 0.92 + 40
       const s = shoreSdf(x, z)
@@ -303,8 +305,8 @@ export class LakeDressing {
   /** Mooring buoys at the named destinations — they ride the real waves. */
   private buildBuoys(): void {
     const spots = [
-      { x: 560, z: 190 }, // cove
-      { x: -140, z: -430 }, // north bay
+      { x: 560 * S, z: 190 * S }, // cove
+      { x: -140 * S, z: -430 * S }, // north bay
       { x: ISLAND.cx + ISLAND.landR + 26, z: ISLAND.cz + 30 }, // island mooring
     ]
     const red = new THREE.MeshStandardMaterial({
