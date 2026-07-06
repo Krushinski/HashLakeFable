@@ -107,6 +107,8 @@ export class ProWater {
    *  exactly and stays silent. */
   private readonly sprayRig = new THREE.Object3D()
   private sprayPhase = 0
+  private rainAllowed = true
+  private lastRainOn = false
   private boatRef: BoatSystem | null = null
   private envBaker: { enabled: boolean; bakeAll(): void } | null = null
 
@@ -198,6 +200,22 @@ export class ProWater {
     console.log('[boot] sky:provider')
     const provider = p.sky.asSkyProvider({ envMap: { width: 512 } })
     for (const m of provider.getMeshes()) scene.add(m)
+    // CLOUDS BEHIND MOUNTAINS (§user, turquoise pass): the cloud
+    // composite quad ships depthTest=false — a pure screen overlay that
+    // painted cloud sheets ACROSS the hero range's face. Its fullscreen
+    // triangle sits at the far plane under WebGPU reverse-z, so enabling
+    // the depth test clips clouds behind terrain while open sky (cleared
+    // depth) still passes. Vendor default is fine over their flat ocean;
+    // wrong under 900 m peaks. ?cloudoverlay restores the overlay.
+    if (!flags.has('cloudoverlay')) {
+      for (const m of provider.getMeshes()) {
+        const mesh = m as THREE.Mesh
+        const mat = mesh.material as THREE.Material | undefined
+        if (mat && mat.depthTest === false && mesh.renderOrder === -5) {
+          mat.depthTest = true
+        }
+      }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const baker = (p.sky as any)._providerEnvMap
     baker.bakeAll()
@@ -273,7 +291,10 @@ export class ProWater {
     // 0.9 not 0.5: the dt clamp runs the sim at ~40% speed at 25fps, so
     // decay must be stiffer than real-lake values for trails to die on
     // a human timescale
-    p.water.wake.friction = 0.9
+    // 1.05 (was 0.9): the accumulated field at 150 mph sloshed on as a
+    // "seesaw" chasing the boat into shores (§user) — stiffer damping
+    // kills the standing energy within a couple of seconds
+    p.water.wake.friction = 1.05
     // Visible-wake tune (verified against the sim's gating math): the
     // dt-clamped sim runs ~40% speed at 25fps and rarely reaches 0.2
     // steepness, which is why the old trail was near-invisible.
@@ -351,7 +372,7 @@ export class ProWater {
     // foam texture as pale streak lines. range 4 = the water only
     // clears in the last ~2 m of column at the true beach edge — a
     // legible waterline instead of a vanishing lake.
-    p.water.foam.shoreline.range = 5.5
+    p.water.foam.shoreline.range = 7
 
     // SSR: the medium-tier clamp only runs at create — a post-create
     // enable STICKS, and it also turns on the scene-color pass that
@@ -400,8 +421,8 @@ export class ProWater {
     // 0.5 m over white sand, saturated by 3 m — the demo gradient.
     p.water.color.absorptionColor = '#ff5a2e'
     // brighter teal in-scatter — pushes the shoreline turquoise band
-    // further out (§user: "more teals near the shorelines")
-    p.water.color.transmissionColor = '#33a189'
+    // further out (§user: "more teals near the shorelines", twice)
+    p.water.color.transmissionColor = '#3cb69c'
     // deep-body hue: a notch bluer than the fork tune — straight down
     // over the basin the old value read olive-gray instead of alpine
     p.water.color.waterColor = '#0d4554'
@@ -409,7 +430,7 @@ export class ProWater {
     // the dusk OCEAN's 100 m — every depth-graded term (fallback columns,
     // deep-water saturation) was stretched 4× past our basin. This lake
     // bottoms out at MAX_LAKE_DEPTH (14 m post-turquoise verdict).
-    p.water.color.waterDepth = 14
+    p.water.color.waterDepth = 11
     // 0.35 was tuned while refraction sampled a broken black texture —
     // at high tier with honest full-res scene color it over-bent far
     // enough to stamp a pale hull-shaped phantom into the foam beside
@@ -418,13 +439,14 @@ export class ProWater {
     p.water.fresnel.refractionStrength = 0.16
     p.water.fresnel.normalStrength = 1.25
 
-    // X-ARTIFACT PRIME SUSPECT: rain is the only world-anchored system
-    // that was ON in every X sighting (foam accumulation proven inert
-    // under dusk; wake foam zeroed under ?nowake; caustics floor-only
-    // and the floor is hidden; spray compiled out at medium). Default
-    // OFF; ?rain re-enables for the attribution A/B.
-    p.water.rain.particles.enabled = flags.has('rain')
-    p.water.rain.ripples.enabled = flags.has('rain')
+    // Water Pro rain: WIRED TO THE STORM (final push) — ripple rings +
+    // particles arrive with the network's rain, handled per-band in
+    // applyWeatherRaw. The old X-artifact suspicion kept these behind
+    // ?rain; tier-gating confines any recurrence to real storms where
+    // rain belongs. ?norain kills them outright for attribution.
+    p.rainAllowed = !flags.has('norain')
+    p.water.rain.particles.enabled = false
+    p.water.rain.ripples.enabled = false
 
     // Sparkle exonerated for the streaks (they were the shoreline zone
     // + clipmap strips) — near-field glints restored to the dusk default.
@@ -639,11 +661,11 @@ export class ProWater {
     // top-end swell trimmed (§user: 150 mph wake "slightly too big"):
     // stern peaks at 1.15 not 1.4 — still a real wall, no basin-churner
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.7 + k * 0.45) * idle * shallow,
+      depth: (0.62 + k * 0.33) * idle * shallow,
       radius: 4.5 + k * 1.5,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
-      depth: (0.45 + k * 0.22) * idle * shallow,
+      depth: (0.4 + k * 0.18) * idle * shallow,
       radius: 3.5 + k * 1.0,
     })
     // SSR fades with speed: screen-space reflections are where the
@@ -687,6 +709,16 @@ export class ProWater {
       void this.sky
         .applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
         .then(() => this.liftCloudDeck(skyBand))
+    }
+
+    // Water Pro surface rain rides the storm: ripple rings + falling
+    // streaks from Violent upward (tierT ≥ 2.4 tracks the network's
+    // rain dial crossing ~0.4)
+    const rainOn = this.rainAllowed && tierT >= 2.4
+    if (rainOn !== this.lastRainOn) {
+      this.lastRainOn = rainOn
+      this.water.rain.particles.enabled = rainOn
+      this.water.rain.ripples.enabled = rainOn
     }
   }
 

@@ -40,12 +40,11 @@ export const LAKE_SCALE =
 /** World-space square covered by the lake data texture, centered on origin. */
 export const LAKE_TEX_WORLD_SIZE = Math.ceil(2048 * LAKE_SCALE)
 
-// 14 not 26 (§user, post-turquoise): at 26 m the basin raced to
-// near-black in a 960 m lake — hard color terraces where the shelf
-// dropped. 14 m keeps the whole body in the turquoise-to-deep-teal
-// band, spreads the gradient across the full basin, and lets caustics
-// and bed shapes read further out.
-export const MAX_LAKE_DEPTH = 14
+// 11 m (§user, third depth verdict: "no hard cutoffs anywhere"): with
+// the shelf stretched to 380·S the whole basin is ONE long gradient —
+// turquoise shelf into deep teal with no perceptual cliff. Caustics
+// and bed shapes stay readable across most of the lake.
+export const MAX_LAKE_DEPTH = 11
 
 interface Blob {
   cx: number
@@ -182,8 +181,10 @@ export function bedHeight(x: number, z: number): number {
   const sdf = shoreSdf(x, z)
 
   // Base basin: bed drops from the shoreline toward max depth mid-lake
-  // (shelf width scales with the world so beach grading stays proportional).
-  const t = Math.min(1, Math.max(0, -sdf / (290 * LAKE_SCALE)))
+  // (shelf width scales with the world so beach grading stays
+  // proportional). 380·S: the long shelf is what makes the depth read
+  // as one continuous turquoise-to-teal gradient, never a cliff.
+  const t = Math.min(1, Math.max(0, -sdf / (380 * LAKE_SCALE)))
   let bed = -MAX_LAKE_DEPTH * Math.pow(t, 1.2)
 
   // Gentle bed relief so the shallows aren't a perfect ramp.

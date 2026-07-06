@@ -140,17 +140,20 @@ export function terrainHeight(x: number, z: number): number {
   // legible sand walk — the relief noise below used to add ±2.5 m right
   // at the waterline, shredding the beach line into jagged nibbles. It
   // ramps in beyond the apron instead.
+  // relief ramps STRETCHED (§user: a zigzag terrace creased every beach
+  // where the noise switched on across ~2 grid cells — ramp the folds in
+  // over 130-150 m so no contour ledge can form at the apron edge)
   h +=
     fbm2(x * 0.0022, z * 0.0022, { octaves: 4, seed: 77 }) *
     2.6 *
-    Math.min(1, Math.max(0, (sdf - 24) / 90))
+    Math.min(1, Math.max(0, (sdf - 26) / 150))
 
   // rolling breaks — real land is never a smooth ramp; these folds are
   // where shadows live (§user: ruggedness/mood pass)
   h +=
     fbm2(x * 0.008, z * 0.008, { octaves: 3, seed: 131 }) *
     3.4 *
-    Math.min(1, Math.max(0, (sdf - 24) / 60))
+    Math.min(1, Math.max(0, (sdf - 26) / 130))
 
   // occasional rocky outcrop knolls that shoulder out of the meadow —
   // their slopes flip the shader to granite automatically

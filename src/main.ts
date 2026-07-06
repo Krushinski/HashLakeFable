@@ -104,7 +104,7 @@ async function boot(): Promise<void> {
   // 11 fps on the 4K desktop): cap the render at ~2.4 MP — about
   // 1080p-and-a-half — and let the browser upscale. Slight softness on
   // huge monitors buys the frame rate back; small screens are untouched.
-  const PIXEL_BUDGET = 2.4e6
+  const PIXEL_BUDGET = 2.0e6
   const applyPixelBudget = () => {
     const base = Math.min(window.devicePixelRatio, USE_PRO ? 1.0 : 1.5)
     const px = window.innerWidth * window.innerHeight * base * base
@@ -567,6 +567,17 @@ async function boot(): Promise<void> {
   // of the drive jitter. The guard makes overlapping callbacks no-ops.
   let frameBusy = false
 
+  // FRAME-PACING SURGERY (§user: 10 fps desktop): awaiting pro.update
+  // inside the rAF callback gated PRESENTATION on the water's GPU
+  // readback chain — every await that crossed a vsync boundary made the
+  // next whole rAF tick a frameBusy no-op, quantizing ~20 real fps down
+  // to ~10 presented. The water now updates fire-and-forget behind its
+  // own reentrancy latch: every rAF presents, the water sim resolves at
+  // its own cadence one frame late (its pose was already frame-late by
+  // design). ?syncloop restores the old serialized loop for A/B.
+  const asyncWater = !new URLSearchParams(location.search).has('syncloop')
+  let waterBusy = false
+
   // vendor-recommended (docs/guide/basic-example): precompile the scene's
   // shaders before the first frame instead of hitching through async
   // pipeline compiles during the opening seconds
@@ -644,10 +655,24 @@ async function boot(): Promise<void> {
       pro.boatProxy.position.x = boat.x
       pro.boatProxy.position.z = boat.z
       pro.setBoatSpeed(Math.abs(boat.speed))
-      await pro.update(dt)
+      if (asyncWater) {
+        // fire-and-forget behind the latch — presentation never waits
+        if (!waterBusy) {
+          waterBusy = true
+          void pro
+            .update(dt)
+            .catch((err) => console.error('water update failed:', err))
+            .finally(() => {
+              waterBusy = false
+            })
+        }
+      } else {
+        await pro.update(dt)
+      }
       // smooth the proxy's heave before the hull takes it — Water Pro's
       // own smoothing assumes 60Hz steps and passes jitter through at
-      // 20fps (the resting-boat glitch)
+      // 20fps (the resting-boat glitch); under asyncWater this reads the
+      // most recently RESOLVED pose (one frame late by design)
       const prevHeave = boat.externalHeave ?? pro.boatProxy.position.y
       boat.externalHeave =
         prevHeave +
