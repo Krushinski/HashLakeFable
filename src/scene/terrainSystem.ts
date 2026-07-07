@@ -264,7 +264,8 @@ export class FarRanges {
       )
       const snow = color(0xe8edf0)
       const snowJit = mx_noise_float(vec3(positionLocal.xz.mul(0.004), 5.5)).mul(90)
-      return mix(rock, snow, smoothstep(float(620), float(790), vH.add(snowJit)))
+      // back-wall caps one haze-step behind the hero caps (sunset council)
+      return mix(rock, snow, smoothstep(float(560), float(720), vH.add(snowJit)))
     })()
     const mesh = new THREE.Mesh(geo, material)
     scene.add(mesh)
@@ -506,11 +507,16 @@ export class TerrainSystem {
 
       // snow on high, flatter faces — the line broken by drift noise so
       // it reads as fingers and gullies, never a contour line
+      // snow line lowered for the 0.75 world (sunset council): heights
+      // are absolute meters but the ridge carve leaves the 820 m massif
+      // rendering ~550-690 — the old 455-590 ramp barely frosted the
+      // tips. Full caps + longer drift fingers; the slope cutoff still
+      // strips cliff faces bare.
       const snowJitter = mx_noise_float(vec3(worldXZ.mul(0.006), 21.7))
-        .mul(70)
+        .mul(85)
       const snowMask = smoothstep(
-        float(455),
-        float(590),
+        float(380),
+        float(520),
         vHeight.add(snowJitter),
       ).mul(float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)))
 

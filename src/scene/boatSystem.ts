@@ -107,6 +107,9 @@ export class BoatSystem {
    *  Spinning meshes individually made each blade orbit its own pivot —
    *  the "ceiling fan" (§user, twice). */
   private readonly propParts: THREE.Mesh[] = []
+  /** Static running gear (shaft/rudder/exhausts) — shrunk toward the
+   *  hull line at load so it reads as machinery, not a kitchen fork. */
+  private readonly gearMeshes: THREE.Mesh[] = []
   private propGroup: THREE.Group | null = null
   private readonly propAxis = new THREE.Vector3(1, 0, 0)
   private ready = false
@@ -151,6 +154,13 @@ export class BoatSystem {
       if (mesh.name.startsWith('PropBlade') || mesh.name === 'PropHub') {
         this.propParts.push(mesh)
       }
+      if (
+        ['PropShaft', 'Rudder', 'ExhaustTipP', 'ExhaustTipS'].includes(
+          mesh.name,
+        )
+      ) {
+        this.gearMeshes.push(mesh)
+      }
     })
 
     // face -z when heading = π (glTF -z forward after y-up export; our hull
@@ -185,6 +195,32 @@ export class BoatSystem {
       const q = pg.getWorldQuaternion(new THREE.Quaternion()).invert()
       this.propAxis.copy(worldShaft).applyQuaternion(q).normalize()
       this.propGroup = pg
+
+      // PROP DIGNITY (§user: "laughing stock"): shrink the assembly 30%
+      // about the hub and tuck it 0.28 m forward / 0.1 m up toward the
+      // hull shadow. Safe: rotateOnAxis only touches the quaternion, so
+      // scale/position never fight the spin; pg's quaternion is still
+      // identity here, so the resolved axes are exact.
+      pg.scale.setScalar(0.7)
+      const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize()
+      pg.translateOnAxis(this.propAxis, 0.28)
+      pg.translateOnAxis(localUp, 0.1)
+    }
+
+    // static gear (shaft/rudder/exhaust tips): shrink each toward its
+    // TOP edge so it hugs the hull line — no gap opens where it meets
+    // the boat; same proven attach() math as the prop rig
+    for (const m of this.gearMeshes) {
+      const bb = new THREE.Box3().setFromObject(m)
+      const pivotW = bb.getCenter(new THREE.Vector3())
+      pivotW.y = bb.max.y
+      const g2 = new THREE.Group()
+      const par = m.parent as THREE.Object3D
+      par.add(g2)
+      g2.position.copy(par.worldToLocal(pivotW.clone()))
+      g2.updateMatrixWorld(true)
+      g2.attach(m)
+      g2.scale.setScalar(m.name === 'Rudder' ? 0.75 : 0.8)
     }
     this.ready = true
   }

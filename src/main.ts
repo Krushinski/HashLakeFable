@@ -253,7 +253,16 @@ async function boot(): Promise<void> {
       scenePassColor,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) as any
-    const withBloom = waterOut.add(bloom(waterOut, 0.09, 0.3, 1.45))
+    // night runs the vendor moonlit bloom rig (2.7/0.5/0.75) — the moon
+    // glint-trail halo IS a bloom effect; day graph stays byte-identical
+    const withBloom = waterOut.add(
+      bloom(
+        waterOut,
+        NIGHT_MODE ? 2.7 : 0.09,
+        NIGHT_MODE ? 0.5 : 0.3,
+        NIGHT_MODE ? 0.75 : 1.45,
+      ),
+    )
     post.outputColorTransform = false
     post.outputNode = fxaa(renderOutput(withBloom))
   } else {
@@ -357,17 +366,23 @@ async function boot(): Promise<void> {
       else document.documentElement.requestFullscreen()
     }
     if (e.key === 'Enter' && driveMode) {
-      localStorage.setItem(
-        TABLEAU_KEY,
-        JSON.stringify({
-          x: boat.x,
-          z: boat.z,
-          heading: boat.heading,
-          camPos: camRig.pos.toArray(),
-          camLook: camRig.look.toArray(),
-        }),
-      )
-      toast.show('Tableau saved')
+      // storage can be blocked (kiosk/privacy profiles) — never throw
+      // from a keydown
+      try {
+        localStorage.setItem(
+          TABLEAU_KEY,
+          JSON.stringify({
+            x: boat.x,
+            z: boat.z,
+            heading: boat.heading,
+            camPos: camRig.pos.toArray(),
+            camLook: camRig.look.toArray(),
+          }),
+        )
+        toast.show('Tableau saved')
+      } catch {
+        toast.show('Tableau not saved — storage blocked')
+      }
     }
     if (e.key === 'r' || e.key === 'R') {
       // R re-frames the OPENING hero shot around wherever the boat is now
@@ -737,11 +752,16 @@ async function boot(): Promise<void> {
         }
       } else {
         // resync: run synchronously (never overlapping an in-flight
-        // update) so every screen-space pass re-aligns to THIS camera
+        // update) so every screen-space pass re-aligns to THIS camera.
+        // The catch is LOAD-BEARING (sunset audit): an uncaught rejection
+        // here escapes the loop callback with frameBusy latched true —
+        // every later frame no-ops and the game freezes forever.
         if (!waterBusy) {
           waterBusy = true
           try {
             await pro.update(dt)
+          } catch (err) {
+            console.error('water update failed:', err)
           } finally {
             waterBusy = false
           }

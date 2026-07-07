@@ -280,6 +280,13 @@ export class ProWater {
     // physics" / hurricane-shake session).
     p.water = await WaterSystem.create(renderer, scene, camera, WATER_QUALITY)
     p.water.loadPreset(getPresetParams('dusk'))
+    // SSS to blackFlag's SUNNY values (sunset council): our lighting rig
+    // is already blackFlag's daylight, but SSS still ran dusk's narrow
+    // lobe (0.6 @ power 2.3) — the wide low-power glow (0.35 @ 0.85) is
+    // the backlit-turquoise crest light the demo's sunny water is known
+    // for. Night re-asserts its own 0.2 later.
+    p.water.sss.intensity = 0.35
+    p.water.sss.power = 0.85
     p.water.updateCascadeConfig(0, CASCADES.waves)
     p.water.updateCascadeConfig(1, CASCADES.ripples)
 
