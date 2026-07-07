@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu'
+import { positionGeometry, vec4 } from 'three/tsl'
 import {
   WaterSystem,
   Sky as WaterProSky,
@@ -205,19 +206,29 @@ export class ProWater {
     console.log('[boot] sky:provider')
     const provider = p.sky.asSkyProvider({ envMap: { width: 512 } })
     for (const m of provider.getMeshes()) scene.add(m)
-    // CLOUDS BEHIND MOUNTAINS (§user, turquoise pass): the cloud
-    // composite quad ships depthTest=false — a pure screen overlay that
-    // painted cloud sheets ACROSS the hero range's face. Its fullscreen
-    // triangle sits at the far plane under WebGPU reverse-z, so enabling
-    // the depth test clips clouds behind terrain while open sky (cleared
-    // depth) still passes. Vendor default is fine over their flat ocean;
-    // wrong under 900 m peaks. ?cloudoverlay restores the overlay.
+    // CLOUDS BEHIND MOUNTAINS, once and for all: the cloud composite is
+    // a fullscreen triangle whose vertexNode emits clip z = 0 — under
+    // three's DEFAULT (non-reversed) WebGPU depth that is the NEAR
+    // plane, so a depth test passes everywhere and the overlay paints
+    // cloud sheets across the range regardless (measured: the earlier
+    // depthTest-only fix changed nothing — reversedDepthBuffer defaults
+    // false in r185). Re-emit the triangle at the FAR plane and test:
+    // terrain now occludes clouds; open sky (cleared depth 1.0) still
+    // passes. ?cloudoverlay restores the vendor overlay.
     if (!flags.has('cloudoverlay')) {
       for (const m of provider.getMeshes()) {
         const mesh = m as THREE.Mesh
-        const mat = mesh.material as THREE.Material | undefined
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mat = mesh.material as any
         if (mat && mat.depthTest === false && mesh.renderOrder === -5) {
+          mat.vertexNode = vec4(
+            positionGeometry.x,
+            positionGeometry.y,
+            0.9999,
+            1,
+          )
           mat.depthTest = true
+          mat.needsUpdate = true
         }
       }
     }

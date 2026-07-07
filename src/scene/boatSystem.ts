@@ -306,23 +306,29 @@ export class BoatSystem {
     let nz = this.z + dirZ * this.speed * dt
 
     // ------------------------------------------------------- boundaries
-    const look = 10 + Math.abs(this.speed) * 0.7
+    // RELAXED for the 0.75x world (§user: "stuck between the island and
+    // land channel... allow more land climbing, just not crazy"): the
+    // braking radii are absolute meters, but the channels shrank with
+    // the world — the old 14 m bubble touched BOTH shores of the island
+    // back-channel at once and pinned the throttle. Tighter bubble,
+    // gentler bleed, land still ends the run.
+    const look = 6 + Math.abs(this.speed) * 0.45
     const aheadSdf = shoreSdf(nx + dirX * look, nz + dirZ * look)
-    if (aheadSdf > -14) {
+    if (aheadSdf > -8) {
       // approaching shore: bleed speed smoothly
-      const closeness = Math.min(1, (aheadSdf + 14) / 26)
-      this.speed *= Math.exp(-closeness * 3.4 * dt)
+      const closeness = Math.min(1, (aheadSdf + 8) / 16)
+      this.speed *= Math.exp(-closeness * 2.6 * dt)
     }
     const hereSdf = shoreSdf(nx, nz)
-    if (hereSdf > -5) {
+    if (hereSdf > -3) {
       // gently push back toward open water via the SDF gradient
       const e = 2
       const gx = shoreSdf(nx + e, nz) - shoreSdf(nx - e, nz)
       const gz = shoreSdf(nx, nz + e) - shoreSdf(nx, nz - e)
       const glen = Math.hypot(gx, gz) || 1
-      nx -= (gx / glen) * (hereSdf + 5) * 0.5
-      nz -= (gz / glen) * (hereSdf + 5) * 0.5
-      this.speed *= Math.exp(-2.5 * dt)
+      nx -= (gx / glen) * (hereSdf + 3) * 0.5
+      nz -= (gz / glen) * (hereSdf + 3) * 0.5
+      this.speed *= Math.exp(-2.2 * dt)
     }
 
     // ------------------------------------------- shallow-water grounding
@@ -331,9 +337,9 @@ export class BoatSystem {
     // so the boat stops exactly where the shallows visually begin.
     const DRAFT = 0.7
     const depthAhead = waterDepth(nx + dirX * look, nz + dirZ * look)
-    if (depthAhead < DRAFT + 1.8) {
-      const closeness = 1 - Math.max(0, depthAhead - DRAFT) / 1.8
-      this.speed *= Math.exp(-closeness * 3.6 * dt)
+    if (depthAhead < DRAFT + 1.0) {
+      const closeness = 1 - Math.max(0, depthAhead - DRAFT) / 1.0
+      this.speed *= Math.exp(-closeness * 2.8 * dt)
     }
     const depthHere = waterDepth(nx, nz)
     if (depthHere < DRAFT + 0.15) {
@@ -353,8 +359,10 @@ export class BoatSystem {
     // forward progress there. Without this, throttle vs. the decay
     // above settles into an endless ~3 mph crawl that once carried the
     // hull 40 m inland. Reverse stays free so a beached boat refloats.
-    const BEACH_LIMIT_SDF = 1.2
-    const BEACH_DEPTH = 0.25
+    // 4 m of deliberate bow-in-the-sand (§user: get close enough to SEE
+    // the beach); reverse still refloats
+    const BEACH_LIMIT_SDF = 4.0
+    const BEACH_DEPTH = 0.12
     if (
       this.speed > 0 &&
       (hereSdf > BEACH_LIMIT_SDF || depthHere < BEACH_DEPTH)

@@ -586,6 +586,18 @@ async function boot(): Promise<void> {
   // design). ?syncloop restores the old serialized loop for A/B.
   const asyncWater = !new URLSearchParams(location.search).has('syncloop')
   let waterBusy = false
+  // CAMERA-JUMP RESYNC (the "drunk / seeing triple" kill): under the
+  // async loop, the water's screen-space passes (scene color, depth,
+  // SSR) lag the presented camera by however long the GPU takes —
+  // invisible while motion is coherent (150 mph straight feels perfect),
+  // but a teleporting camera (C presets, orbit whips, top-down returns)
+  // leaves refraction/reflection sampling YESTERDAY'S screen for several
+  // frames, and every consumer smears. Detect the jump, run the water
+  // synchronously for a few frames so all passes re-align, go async
+  // again.
+  const camPrev = new THREE.Vector3()
+  const camPrevQuat = new THREE.Quaternion()
+  let syncFrames = 0
 
   // vendor-recommended (docs/guide/basic-example): precompile the scene's
   // shaders before the first frame instead of hitching through async
@@ -664,11 +676,20 @@ async function boot(): Promise<void> {
       // must track the live camera or fast moves stamp stale copies
       // across the frame (the "seeing triple" regression)
       pro.updateSky(dt)
+      // camera teleport/whip? (position or attitude step this frame)
+      if (
+        camera.position.distanceToSquared(camPrev) > 36 ||
+        Math.abs(camera.quaternion.dot(camPrevQuat)) < 0.99
+      ) {
+        syncFrames = 3
+      }
+      camPrev.copy(camera.position)
+      camPrevQuat.copy(camera.quaternion)
       // proxy carries the hull footprint; Water Pro resolves its heave
       pro.boatProxy.position.x = boat.x
       pro.boatProxy.position.z = boat.z
       pro.setBoatSpeed(Math.abs(boat.speed))
-      if (asyncWater) {
+      if (asyncWater && syncFrames === 0) {
         // fire-and-forget behind the latch — presentation never waits
         if (!waterBusy) {
           waterBusy = true
@@ -680,7 +701,17 @@ async function boot(): Promise<void> {
             })
         }
       } else {
-        await pro.update(dt)
+        // resync: run synchronously (never overlapping an in-flight
+        // update) so every screen-space pass re-aligns to THIS camera
+        if (!waterBusy) {
+          waterBusy = true
+          try {
+            await pro.update(dt)
+          } finally {
+            waterBusy = false
+          }
+        }
+        if (syncFrames > 0) syncFrames--
       }
       // smooth the proxy's heave before the hull takes it — Water Pro's
       // own smoothing assumes 60Hz steps and passes jitter through at
