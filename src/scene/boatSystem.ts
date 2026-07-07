@@ -108,18 +108,11 @@ export class BoatSystem {
   private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
-  /** Prop assembly (PropHub/PropBlade*): reparented at load into ONE
-   *  group centered on the hub, spun about the resolved shaft axis.
-   *  Spinning meshes individually made each blade orbit its own pivot —
-   *  the "ceiling fan" (§user, twice). */
-  private readonly propParts: THREE.Mesh[] = []
-  /** Static running gear (shaft/rudder/exhausts) — shrunk toward the
-   *  hull line at load so it reads as machinery, not a kitchen fork. */
+  /** Exhaust tips — shrunk toward the hull line at load. (The prop,
+   *  shaft, and rudder are DELETED entirely: §user, final word.) */
   private readonly gearMeshes: THREE.Mesh[] = []
   /** The flag staff — stretched down into the deck at load. */
   private gearStaff: THREE.Mesh | null = null
-  private propGroup: THREE.Group | null = null
-  private readonly propAxis = new THREE.Vector3(1, 0, 0)
   private ready = false
 
   constructor(
@@ -157,16 +150,16 @@ export class BoatSystem {
       if (mesh.name.includes('Scarf')) {
         this.riggedScarf(mesh)
       }
-      // the running gear spins with throttle (§user) — blades + hub only;
-      // the shaft is visually static and the rudder steers, not spins
-      if (mesh.name.startsWith('PropBlade') || mesh.name === 'PropHub') {
-        this.propParts.push(mesh)
-      }
+      // running gear DELETED entirely (§user, final word): no prop, no
+      // shaft, no rudder — the hull rides clean. Exhaust tips stay
+      // (transom trim, above the waterline).
       if (
-        ['PropShaft', 'Rudder', 'ExhaustTipP', 'ExhaustTipS'].includes(
-          mesh.name,
-        )
+        mesh.name.startsWith('PropBlade') ||
+        ['PropHub', 'PropShaft', 'Rudder'].includes(mesh.name)
       ) {
+        mesh.visible = false
+      }
+      if (['ExhaustTipP', 'ExhaustTipS'].includes(mesh.name)) {
         this.gearMeshes.push(mesh)
       }
       if (mesh.name === 'SternStaff') this.gearStaff = mesh
@@ -179,54 +172,11 @@ export class BoatSystem {
     holder.add(gltf.scene)
     this.group.add(holder)
 
-    // Prop rig: ONE group centered on the hub — blades attach with their
-    // world transforms preserved, so the whole assembly revolves around
-    // the shaft center like a real prop (spinning meshes individually
-    // orbited each blade's own pivot: the ceiling fan). The shaft axis
-    // is the hull's world longitudinal direction at this instant,
-    // expressed in the group's local frame.
     this.group.updateMatrixWorld(true)
-    if (this.propParts.length) {
-      const hub =
-        this.propParts.find((m) => m.name === 'PropHub') ?? this.propParts[0]
-      const hubPos = hub.getWorldPosition(new THREE.Vector3())
-      const pg = new THREE.Group()
-      const parent = hub.parent as THREE.Object3D
-      parent.add(pg)
-      pg.position.copy(parent.worldToLocal(hubPos.clone()))
-      pg.updateMatrixWorld(true)
-      for (const m of this.propParts) pg.attach(m)
-      const worldShaft = new THREE.Vector3(
-        Math.sin(this.heading),
-        0,
-        -Math.cos(this.heading),
-      )
-      const q = pg.getWorldQuaternion(new THREE.Quaternion()).invert()
-      this.propAxis.copy(worldShaft).applyQuaternion(q).normalize()
-      this.propGroup = pg
 
-      // PROP DIGNITY (§user: "laughing stock"): shrink the assembly 30%
-      // about the hub and tuck it 0.28 m forward / 0.1 m up toward the
-      // hull shadow. Safe: rotateOnAxis only touches the quaternion, so
-      // scale/position never fight the spin; pg's quaternion is still
-      // identity here, so the resolved axes are exact.
-      pg.scale.setScalar(0.7)
-      const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize()
-      // right up against the hull bottom (§user round 2: "bring the
-      // propeller up to the boat") — the shaft it used to hang from is
-      // hidden below
-      pg.translateOnAxis(this.propAxis, 0.45)
-      pg.translateOnAxis(localUp, 0.3)
-    }
-
-    // static gear: the dinky shaft stick is RETIRED outright (§user);
-    // rudder/exhausts shrink toward their TOP edges so they hug the
-    // hull line — same proven attach() math as the prop rig
+    // exhaust tips shrink toward their TOP edges so they hug the hull
+    // line (the prop/shaft/rudder meshes are hidden in the traverse)
     for (const m of this.gearMeshes) {
-      if (m.name === 'PropShaft') {
-        m.visible = false
-        continue
-      }
       const bb = new THREE.Box3().setFromObject(m)
       const pivotW = bb.getCenter(new THREE.Vector3())
       pivotW.y = bb.max.y
@@ -505,15 +455,6 @@ export class BoatSystem {
     // flag wind: base breeze + speed
     this.uFlagWind.value = 0.6 + Math.min(2.2, Math.abs(this.speed) * 0.06) +
       this.waveField.params.chopScale * 0.4
-
-    // prop spin: revs follow throttle (idle tickover when moving at all,
-    // full churn at speed; reverses with reverse) — the whole assembly
-    // about the hub-centered shaft axis
-    if (this.propGroup && Math.abs(this.speed) > 0.1) {
-      const revs =
-        (2.5 + Math.abs(this.speed) * 1.3) * Math.sign(this.speed) * dt
-      this.propGroup.rotateOnAxis(this.propAxis, revs)
-    }
 
   }
 
