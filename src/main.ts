@@ -75,6 +75,10 @@ const TIER_VISUALS = {
  *  floored at 0.55: the atmosphere doesn't shrink with the map. */
 const FOG_WORLD = Math.max(0.55, LAKE_SCALE / 2.2)
 
+/** ?night — the tier fog colors are daytime palettes; terrain fog goes
+ *  deep blue-black instead (proWater owns the water-side night rig). */
+const NIGHT_MODE = new URLSearchParams(location.search).has('night')
+
 function lerpAnchors(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
   const f = Math.min(1, t - i)
@@ -416,8 +420,17 @@ async function boot(): Promise<void> {
   // ---------- frame-mode look-around (click-drag, §6.1 + user contract:
   // the drag ORBITS the boat, so the hero stays center-frame while you
   // swing around it) ----------
+  // WHIP SMOOTHING (§user: "acid trips when I click, hold, and whip"):
+  // the drag used to TELEPORT camRig per mouse event — every whip was a
+  // chain of camera jumps, and jumps are what desync the water's
+  // screen-space passes. The mouse now moves a GOAL; the camera chases
+  // it in the frame loop at ~0.2 s settle — a hard whip becomes a fast
+  // but COHERENT swing the pipeline can track.
   let dragging = false
   const orbitStart = { px: 0, py: 0, yaw: 0, pitch: 0, radius: 60 }
+  const orbitGoal = { yaw: 0, pitch: 0 }
+  const orbitCur = { yaw: 0, pitch: 0 }
+  let orbitActive = false
   const orbitAnchor = new THREE.Vector3()
   renderer.domElement.addEventListener('pointerdown', (e) => {
     if (driveMode) return
@@ -431,26 +444,45 @@ async function boot(): Promise<void> {
     )
     orbitStart.px = e.clientX
     orbitStart.py = e.clientY
+    orbitGoal.yaw = orbitStart.yaw
+    orbitGoal.pitch = orbitStart.pitch
+    orbitCur.yaw = orbitStart.yaw
+    orbitCur.pitch = orbitStart.pitch
+    orbitActive = true
   })
   window.addEventListener('pointermove', (e) => {
     if (!dragging || driveMode) return
-    const yaw = orbitStart.yaw - (e.clientX - orbitStart.px) * 0.0035
-    const pitch = THREE.MathUtils.clamp(
+    orbitGoal.yaw = orbitStart.yaw - (e.clientX - orbitStart.px) * 0.0035
+    orbitGoal.pitch = THREE.MathUtils.clamp(
       orbitStart.pitch + (e.clientY - orbitStart.py) * 0.0022,
       0.02,
       1.15,
     )
-    const r = orbitStart.radius
-    camRig.pos.set(
-      orbitAnchor.x + Math.sin(yaw) * Math.cos(pitch) * r,
-      orbitAnchor.y + Math.sin(pitch) * r,
-      orbitAnchor.z + Math.cos(yaw) * Math.cos(pitch) * r,
-    )
-    camRig.look.set(orbitAnchor.x, orbitAnchor.y + 2, orbitAnchor.z)
   })
   window.addEventListener('pointerup', () => {
     dragging = false
   })
+  /** Advance the smoothed orbit each frame (frame mode only). */
+  const updateOrbit = (dt: number) => {
+    if (!orbitActive) return
+    const k = 1 - Math.exp(-dt * 9)
+    orbitCur.yaw += (orbitGoal.yaw - orbitCur.yaw) * k
+    orbitCur.pitch += (orbitGoal.pitch - orbitCur.pitch) * k
+    const r = orbitStart.radius
+    camRig.pos.set(
+      orbitAnchor.x + Math.sin(orbitCur.yaw) * Math.cos(orbitCur.pitch) * r,
+      orbitAnchor.y + Math.sin(orbitCur.pitch) * r,
+      orbitAnchor.z + Math.cos(orbitCur.yaw) * Math.cos(orbitCur.pitch) * r,
+    )
+    camRig.look.set(orbitAnchor.x, orbitAnchor.y + 2, orbitAnchor.z)
+    if (
+      !dragging &&
+      Math.abs(orbitGoal.yaw - orbitCur.yaw) < 0.002 &&
+      Math.abs(orbitGoal.pitch - orbitCur.pitch) < 0.002
+    ) {
+      orbitActive = false
+    }
+  }
 
   new MobileControls(input, {
     toggleDrive: () => {
@@ -504,6 +536,7 @@ async function boot(): Promise<void> {
     if (d.fireWeather > 0) {
       fog.color.lerp(new THREE.Color(0x3a140a), d.fireWeather * 0.6)
     }
+    if (NIGHT_MODE) fog.color.set(0x0b111c)
     const staleCrush = 1 - d.fog * 0.82
     fog.near = lerpAnchors(TIER_VISUALS.fogNear, t) * staleCrush * FOG_WORLD
     fog.far =
@@ -643,6 +676,8 @@ async function boot(): Promise<void> {
       // keep frame-mode look target primed so exit glides, not snaps
       curLook.set(boat.x, 8, boat.z)
     } else {
+      // smoothed orbit drag first — it writes camRig, the damping reads it
+      updateOrbit(dt)
       // damped tableau camera — gives the smooth zoom-out when leaving
       // drive mode, and glides between presets / orbit-drag poses
       const blend = 1 - Math.exp(-dt * 2.2)

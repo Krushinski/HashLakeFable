@@ -102,12 +102,13 @@ export class BoatSystem {
   private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
-  /** Prop assembly (PropHub/PropBlade*) with each mesh's LOCAL shaft
-   *  axis resolved at load — spun with throttle about the true shaft. */
-  private readonly propMeshes: Array<{
-    mesh: THREE.Mesh
-    axis: THREE.Vector3
-  }> = []
+  /** Prop assembly (PropHub/PropBlade*): reparented at load into ONE
+   *  group centered on the hub, spun about the resolved shaft axis.
+   *  Spinning meshes individually made each blade orbit its own pivot —
+   *  the "ceiling fan" (§user, twice). */
+  private readonly propParts: THREE.Mesh[] = []
+  private propGroup: THREE.Group | null = null
+  private readonly propAxis = new THREE.Vector3(1, 0, 0)
   private ready = false
 
   constructor(
@@ -148,7 +149,7 @@ export class BoatSystem {
       // the running gear spins with throttle (§user) — blades + hub only;
       // the shaft is visually static and the rudder steers, not spins
       if (mesh.name.startsWith('PropBlade') || mesh.name === 'PropHub') {
-        this.propMeshes.push({ mesh, axis: new THREE.Vector3(1, 0, 0) })
+        this.propParts.push(mesh)
       }
     })
 
@@ -159,21 +160,31 @@ export class BoatSystem {
     holder.add(gltf.scene)
     this.group.add(holder)
 
-    // Resolve each prop mesh's LOCAL shaft axis (§user: the first guess
-    // spun blades like a ceiling fan — exporters bake arbitrary local
-    // frames). The shaft runs along the hull's length; express that
-    // world direction in each mesh's local frame at this instant and
-    // spin about THAT. Independent of authored axes forever after.
+    // Prop rig: ONE group centered on the hub — blades attach with their
+    // world transforms preserved, so the whole assembly revolves around
+    // the shaft center like a real prop (spinning meshes individually
+    // orbited each blade's own pivot: the ceiling fan). The shaft axis
+    // is the hull's world longitudinal direction at this instant,
+    // expressed in the group's local frame.
     this.group.updateMatrixWorld(true)
-    const worldShaft = new THREE.Vector3(
-      Math.sin(this.heading),
-      0,
-      -Math.cos(this.heading),
-    )
-    const q = new THREE.Quaternion()
-    for (const p of this.propMeshes) {
-      p.mesh.getWorldQuaternion(q).invert()
-      p.axis.copy(worldShaft).applyQuaternion(q).normalize()
+    if (this.propParts.length) {
+      const hub =
+        this.propParts.find((m) => m.name === 'PropHub') ?? this.propParts[0]
+      const hubPos = hub.getWorldPosition(new THREE.Vector3())
+      const pg = new THREE.Group()
+      const parent = hub.parent as THREE.Object3D
+      parent.add(pg)
+      pg.position.copy(parent.worldToLocal(hubPos.clone()))
+      pg.updateMatrixWorld(true)
+      for (const m of this.propParts) pg.attach(m)
+      const worldShaft = new THREE.Vector3(
+        Math.sin(this.heading),
+        0,
+        -Math.cos(this.heading),
+      )
+      const q = pg.getWorldQuaternion(new THREE.Quaternion()).invert()
+      this.propAxis.copy(worldShaft).applyQuaternion(q).normalize()
+      this.propGroup = pg
     }
     this.ready = true
   }
@@ -314,21 +325,23 @@ export class BoatSystem {
     // gentler bleed, land still ends the run.
     const look = 6 + Math.abs(this.speed) * 0.45
     const aheadSdf = shoreSdf(nx + dirX * look, nz + dirZ * look)
-    if (aheadSdf > -8) {
+    if (aheadSdf > -5) {
       // approaching shore: bleed speed smoothly
-      const closeness = Math.min(1, (aheadSdf + 8) / 16)
-      this.speed *= Math.exp(-closeness * 2.6 * dt)
+      const closeness = Math.min(1, (aheadSdf + 5) / 12)
+      this.speed *= Math.exp(-closeness * 2.2 * dt)
     }
     const hereSdf = shoreSdf(nx, nz)
-    if (hereSdf > -3) {
-      // gently push back toward open water via the SDF gradient
+    // push-back only INSIDE the land line (§user round 2: couldn't come
+    // alongside the dock — the old water-side shove kept 1.5-3 m of
+    // standoff at every shore)
+    if (hereSdf > -1.5) {
       const e = 2
       const gx = shoreSdf(nx + e, nz) - shoreSdf(nx - e, nz)
       const gz = shoreSdf(nx, nz + e) - shoreSdf(nx, nz - e)
       const glen = Math.hypot(gx, gz) || 1
-      nx -= (gx / glen) * (hereSdf + 3) * 0.5
-      nz -= (gz / glen) * (hereSdf + 3) * 0.5
-      this.speed *= Math.exp(-2.2 * dt)
+      nx -= (gx / glen) * (hereSdf + 1.5) * 0.4
+      nz -= (gz / glen) * (hereSdf + 1.5) * 0.4
+      this.speed *= Math.exp(-1.8 * dt)
     }
 
     // ------------------------------------------- shallow-water grounding
@@ -359,9 +372,9 @@ export class BoatSystem {
     // forward progress there. Without this, throttle vs. the decay
     // above settles into an endless ~3 mph crawl that once carried the
     // hull 40 m inland. Reverse stays free so a beached boat refloats.
-    // 4 m of deliberate bow-in-the-sand (§user: get close enough to SEE
-    // the beach); reverse still refloats
-    const BEACH_LIMIT_SDF = 4.0
+    // 6.5 m of deliberate bow-in-the-sand (§user round 2: dock parking
+    // + walk-the-beach closeness); reverse still refloats
+    const BEACH_LIMIT_SDF = 6.5
     const BEACH_DEPTH = 0.12
     if (
       this.speed > 0 &&
@@ -424,12 +437,12 @@ export class BoatSystem {
       this.waveField.params.chopScale * 0.4
 
     // prop spin: revs follow throttle (idle tickover when moving at all,
-    // full churn at speed; reverses with reverse) — about each mesh's
-    // RESOLVED shaft axis, not a guessed authored axis
-    if (this.propMeshes.length && Math.abs(this.speed) > 0.1) {
+    // full churn at speed; reverses with reverse) — the whole assembly
+    // about the hub-centered shaft axis
+    if (this.propGroup && Math.abs(this.speed) > 0.1) {
       const revs =
         (2.5 + Math.abs(this.speed) * 1.3) * Math.sign(this.speed) * dt
-      for (const p of this.propMeshes) p.mesh.rotateOnAxis(p.axis, revs)
+      this.propGroup.rotateOnAxis(this.propAxis, revs)
     }
 
     void input

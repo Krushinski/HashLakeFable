@@ -54,6 +54,73 @@ const WATER_QUALITY = new URLSearchParams(location.search).has('wqmedium')
   ? ('medium' as const)
   : ('high' as const)
 
+/** ?night — moonlit lake under procedural stars (swarm-verified recipe:
+ *  moonlitNight sky preset + anti-solar moon lighting the water + a
+ *  canvas starfield; weather bands keep driving waves/rain, but sky
+ *  presets are frozen so no daylight preset can clobber the night). */
+const NIGHT = new URLSearchParams(location.search).has('night')
+
+/** Tileable equirect starfield, drawn once at boot — the night panorama
+ *  samples UV-mapped sRGB and multiplies by intensity × skyDarkness, so
+ *  a plain 8-bit canvas is exactly the expected input. Equal-area star
+ *  scatter (uniform UV over-densifies the poles) + a tilted Milky Way
+ *  ribbon + temperature-tinted bright stars. */
+function makeStarfieldTexture(): THREE.CanvasTexture {
+  const W = 2048
+  const H = 1024
+  const cv = document.createElement('canvas')
+  cv.width = W
+  cv.height = H
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, W, H)
+  let s = 0x9e3779b9
+  const rnd = () =>
+    ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 0x100000000)
+  const bandV = (u: number) => 0.5 + 0.1 * Math.sin(u * Math.PI * 2 + 1.7)
+  for (let i = 0; i < 900; i++) {
+    // milky way ribbon: soft overlapping glow blobs along a sine band
+    const u = rnd()
+    const v = bandV(u) + (rnd() + rnd() + rnd() - 1.5) * 0.06
+    const x = u * W
+    const y = v * H
+    const r = 8 + rnd() * 32
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+    g.addColorStop(0, `rgba(150,170,210,${(0.02 + rnd() * 0.03).toFixed(3)})`)
+    g.addColorStop(1, 'rgba(150,170,210,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(x - r, y - r, r * 2, r * 2)
+  }
+  const star = (inBand: boolean) => {
+    const u = rnd()
+    let v = rnd()
+    if (inBand) v = bandV(u) + (rnd() + rnd() + rnd() - 1.5) * 0.05
+    else while (rnd() > Math.cos((v - 0.5) * Math.PI)) v = rnd()
+    const x = u * W
+    const y = v * H
+    const b = rnd() ** 3
+    if (b < 0.7) {
+      ctx.fillStyle = `rgba(255,255,255,${((0.25 + b) * (inBand ? 0.55 : 1)).toFixed(3)})`
+      ctx.fillRect(x, y, 1, 1)
+    } else {
+      const t = rnd()
+      const cr = (180 + t * 75) | 0
+      const cg = (195 + t * 45) | 0
+      const cb = (255 - t * 65) | 0
+      const r = b > 0.94 ? 2.5 : 1.5
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+      g.addColorStop(0, `rgba(${cr},${cg},${cb},1)`)
+      g.addColorStop(0.4, `rgba(${cr},${cg},${cb},0.5)`)
+      g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`)
+      ctx.fillStyle = g
+      ctx.fillRect(x - r, y - r, r * 2, r * 2)
+    }
+  }
+  for (let i = 0; i < 3500; i++) star(false)
+  for (let i = 0; i < 1200; i++) star(true)
+  return new THREE.CanvasTexture(cv)
+}
+
 /** FFT cascade tiles, lake-scaled (dusk ships 2642 m / 241 m — ocean fetch).
  *  Order invariant: cascade 0 (waves) must stay larger than 1 (ripples).
  *  NOTE (verified in lib): effective world tile = scale * resolution/256,
@@ -110,6 +177,7 @@ export class ProWater {
   private sprayPhase = 0
   private rainAllowed = true
   private lastRainOn = false
+  private readonly nightMode = NIGHT
   private boatRef: BoatSystem | null = null
   private envBaker: { enabled: boolean; bakeAll(): void } | null = null
 
@@ -148,12 +216,30 @@ export class ProWater {
       // but the world has shrunk and the waste is gone since. Water runs
       // high now; ?skyhigh probes the volumetric-cloud tier on top.
       quality: flags.has('skyhigh') ? 'high' : 'medium',
-      // mid-afternoon alpine light — high, bright sun
-      timeOfDay: { time: 0.58 },
+      // mid-afternoon alpine light — high, bright sun (0.2 = deep night)
+      timeOfDay: { time: NIGHT ? 0.2 : 0.58 },
+      // stars: the panorama's default 100 km sphere clips beyond our
+      // 24 km camera.far and silently never renders — 15 km is inside;
+      // occlusion is safe (its fragment depth is forced to the far
+      // plane). Passing nightSky ALSO activates the bundled moon texture.
+      ...(NIGHT && {
+        nightSky: { texture: makeStarfieldTexture(), radius: 15000, intensity: 0.8 },
+      }),
     })
     console.log('[boot] sky:preset')
-    await p.sky.applyPreset(SKY_PRESETS.pixar)
-    p.liftCloudDeck(0)
+    await p.sky.applyPreset(NIGHT ? SKY_PRESETS.moonlitNight : SKY_PRESETS.pixar)
+    if (NIGHT) {
+      // the preset clobbers star intensity to 0.05 (calibrated for HDR
+      // starmaps, not our 8-bit canvas) and ships coverage 0.6 (cloudy
+      // night hides the stars) — re-assert both
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sk = p.sky as any
+      if (sk.nightSky?.intensity) sk.nightSky.intensity.value = 0.8
+      const cov = sk.clouds?.coverage ?? sk.clouds?.shape?.coverage
+      if (cov?.value !== undefined) cov.value = 0.35
+    } else {
+      p.liftCloudDeck(0)
+    }
 
     // Sky Pro bakes a 256² cloud-shadow map EVERY frame (65k texels × 8
     // light steps of 3D noise) whose only consumers are god-rays and the
@@ -232,6 +318,21 @@ export class ProWater {
         }
       }
     }
+
+    // night stars: the provider mesh list excludes the panorama — add it
+    // ourselves, keep scene fog off the 15 km sphere (the historic
+    // fog-on-sky bug on a new mesh), and keep it out of the water's aux
+    // passes like every other animated/transparent overlay
+    if (NIGHT && p.sky.nightSkyMesh) {
+      const nm = p.sky.nightSkyMesh
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(nm.material as any).fog = false
+      scene.add(nm)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rpmN = (p.water as any).renderPassManager
+      rpmN?.depthPass?.excludeObject?.(nm)
+      rpmN?.sceneColorPass?.excludeObject?.(nm)
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const baker = (p.sky as any)._providerEnvMap
     baker.bakeAll()
@@ -258,7 +359,8 @@ export class ProWater {
     // a touch brighter since our shallows are where the eye lives.
     p.water.floor.setVisible(false)
     p.water.floor.caustics.scale = 34
-    p.water.floor.caustics.intensity = 1.15 // white sand carries caustics
+    // white sand carries caustics; moonlight doesn't burn them in
+    p.water.floor.caustics.intensity = NIGHT ? 0.4 : 1.15
     p.water.floor.caustics.waveDistortion = 0.28
 
     // THE PINK SUN (red-hunt, certainty-grade): the vendor's lighting
@@ -278,6 +380,24 @@ export class ProWater {
     lighting.ambient.skyColor.set(0xd2e3f9)
     lighting.ambient.groundColor.set(0xabe0f2)
     lighting.ambient.intensity = 1.3
+
+    // ?night: moonlit water slices (vendor moonlit preset values, applied
+    // AFTER the daylight rig so they win; the per-frame lighting sync
+    // reads these sources). Waves/wake/foam/fresnel/SSR keep OUR tune.
+    if (NIGHT) {
+      p.water.color.absorptionColor = '#161313'
+      p.water.color.transmissionColor = '#ffffff'
+      p.water.color.waterColor = '#182325'
+      p.water.sss.intensity = 0.2
+      p.water.fog.color = '#474343'
+      lighting.ambient.skyColor.set('#5a6a85')
+      lighting.ambient.groundColor.set('#1b2238')
+      lighting.ambient.intensity = 0.9
+      lighting.sun.color.set('#cdd8ff') // cool moonlight
+      if (lighting.sun.intensity?.value !== undefined) {
+        lighting.sun.intensity.value = 0.7
+      }
+    }
 
     // dusk's warm-brown atmospheric fog repaints the whole basin — pull
     // it back to a thin alpine haze. (The old 'startDistance'/'start'
@@ -454,6 +574,13 @@ export class ProWater {
     // stealing hull pixels.
     p.water.fresnel.refractionStrength = 0.16
     p.water.fresnel.normalStrength = 1.25
+    // night re-assert: the teal day-tune above must not win at night
+    // (caught live: absorption read the day value under ?night)
+    if (NIGHT) {
+      p.water.color.absorptionColor = '#161313'
+      p.water.color.transmissionColor = '#ffffff'
+      p.water.color.waterColor = '#182325'
+    }
 
     // Water Pro rain: WIRED TO THE STORM (final push) — ripple rings +
     // particles arrive with the network's rain, handled per-band in
@@ -495,6 +622,17 @@ export class ProWater {
   attachBoat(boat: BoatSystem): void {
     this.boatRef = boat
     this.wakeAnchor.position.set(boat.group.position.x, 0, boat.group.position.z)
+
+    // THE THREE BOATS (swarm-verified): image 1 = the real render;
+    // image 2 = the boat in the scene-color texture sampled by water
+    // REFRACTION (1-3 frames stale under the async latch); image 3 =
+    // SSR, whose ray-hit color fetch reads the SAME scene-color texture.
+    // One exclusion kills both ghosts. The boat STAYS in the depth pass
+    // (separate exclusion set) so fog/foam/waterline occlusion around
+    // the hull keep working. Cost: no parked mirror reflection of the
+    // boat and no submerged-hull see-through — near-invisible at our
+    // absorption, and ghosting requires motion anyway.
+    this.excludeFromSceneColor(boat.group)
 
     // The flag and scarf sway via TSL positionNode — but the water's
     // depth pass re-renders meshes with replacement materials that DON'T
@@ -728,14 +866,69 @@ export class ProWater {
         wavelengthSpread: 1.6,
         directionalSpread: 0.9,
       })
+
+      // STORM LIGHT RIG (swarm audit): the create()-time blackFlag
+      // daylight otherwise persists through Apocalyptic — a 1.3
+      // pale-cyan ambient kept the whole lake lit at alpine noon under
+      // a thunderstorm ("sky tries but stays bright white", cause #2).
+      // Tier-0 values are byte-identical to the create rig. At NIGHT the
+      // moonlit rig owns the lights — storms still drive the waves.
+      if (!this.nightMode) {
+        const stormMix = Math.max(0, Math.min(1, (tierT - 1.5) / 2.5))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lighting = this.water.lighting as any
+        if (lighting.sun.intensity?.value !== undefined) {
+          lighting.sun.intensity.value = lerpA(
+            [2.5, 2.3, 1.7, 1.0, 0.6],
+            tierT,
+          )
+        }
+        lighting.ambient.intensity = lerpA([1.3, 1.2, 0.9, 0.55, 0.35], tierT)
+        lighting.sun.color
+          .set(0xfffef5)
+          .lerp(new THREE.Color(0xb8c4d4), stormMix)
+        lighting.ambient.skyColor
+          .set(0xd2e3f9)
+          .lerp(new THREE.Color(0x5f6a76), stormMix)
+        lighting.ambient.groundColor
+          .set(0xabe0f2)
+          .lerp(new THREE.Color(0x4c5a60), stormMix)
+
+        // storm fog: the water post-fog reaches FULL strength at fadeEnd
+        // and repainted the far shores bright alpine-haze white through
+        // any storm (cause #3) — slate it down and crush the distances
+        const FOG_S2 = Math.max(0.55, LAKE_SCALE / 2.2)
+        this.water.fog.color = new THREE.Color(0xc4d2d8).lerp(
+          new THREE.Color(0x4a4f55),
+          stormMix,
+        )
+        this.water.fog.fadeStart = 1400 * FOG_S2 * (1 - 0.5 * stormMix)
+        this.water.fog.fadeEnd = 9000 * FOG_S2 * (1 - 0.5 * stormMix)
+      }
     }
 
     const skyBand = Math.min(4, Math.floor(tierT + skyDark))
-    if (skyBand !== this.lastSkyBand) {
+    if (!this.nightMode && skyBand !== this.lastSkyBand) {
       this.lastSkyBand = skyBand
       void this.sky
         .applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
-        .then(() => this.liftCloudDeck(skyBand))
+        .then(() => {
+          this.liftCloudDeck(skyBand)
+          // WHITE STORM SKY, cause #1 (swarm audit): the vendor storm
+          // presets ship full DAYLIGHT source radiance (thunderstorm:
+          // sun 6.49 @ 50.5° elevation, atmosphere exposure 1.0) — and
+          // renderer-exposure cuts land on the ACES SHOULDER, mapping
+          // the dome right back to ~0.9 white. Dim the SOURCE, pre-ACES.
+          // peakIntensity, not intensity.value — the SunDriver rewrites
+          // intensity.value from peakIntensity every frame.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const s = this.sky as any
+          s.atmosphere.exposure.value *= [1, 1, 0.85, 0.55, 0.35][skyBand]
+          s.sun.peakIntensity *= [1, 1, 0.92, 0.72, 0.5][skyBand]
+          // rebake reflections NEXT frame — not up to 6 s of sunny water
+          // under a black sky
+          this.envRefresh = 7
+        })
     }
 
     // Water Pro surface rain rides the storm: ripple rings + falling
@@ -756,10 +949,12 @@ export class ProWater {
    *  the uniform, so this re-asserts after every calm-band switch. */
   private liftCloudDeck(band: number): void {
     if (band > 2) return
+    // altitude lives on clouds.SHAPE (swarm audit: the old clouds.altitude
+    // path was undefined — this lift had NEVER actually run)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const clouds = (this.sky as any).clouds
-    if (clouds?.altitude?.value !== undefined) {
-      clouds.altitude.value = Math.max(clouds.altitude.value, 2700)
+    const shape = (this.sky as any).clouds?.shape
+    if (shape?.altitude?.value !== undefined) {
+      shape.altitude.value = Math.max(shape.altitude.value, 2700)
     }
   }
 
@@ -772,10 +967,17 @@ export class ProWater {
   updateSky(dt: number): void {
     dt = Math.min(dt, 1 / 30)
     this.sky.update(dt)
-    // keep the water's sun/light in step with Sky Pro's sun
+    // keep the water's light in step with the sky: the SUN by day, the
+    // MOON at night (the SunDriver holds the anti-solar moon direction
+    // and gates the sun's intensity to zero below the horizon — pointing
+    // the water's speculars at the moon is what makes the glint trail)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const skySun = (this.sky.sun as any)
-    if (skySun?.direction?.value) {
+    if (this.nightMode) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const moonDir = (this.sky as any).timeOfDay?.moonDirection?.value
+      if (moonDir) this.water.lighting.sun.direction.value.copy(moonDir)
+    } else if (skySun?.direction?.value) {
       this.water.lighting.sun.direction.value.copy(skySun.direction.value)
     }
     // refresh the reflection PMREM from the sky at a low cadence (6s —
