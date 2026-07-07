@@ -35,6 +35,7 @@ import { DebugPanel } from './ui/debugPanel'
 import { LegendPanel } from './ui/legendPanel'
 import { MobileControls } from './ui/mobileControls'
 import { QualityGovernor } from './core/qualityGovernor'
+import { NIGHT_ACTIVE } from './core/nightWatch'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -75,9 +76,10 @@ const TIER_VISUALS = {
  *  floored at 0.55: the atmosphere doesn't shrink with the map. */
 const FOG_WORLD = Math.max(0.55, LAKE_SCALE / 2.2)
 
-/** ?night — the tier fog colors are daytime palettes; terrain fog goes
- *  deep blue-black instead (proWater owns the water-side night rig). */
-const NIGHT_MODE = new URLSearchParams(location.search).has('night')
+/** Night (EST auto or ?night/?day probes; shared single evaluation with
+ *  proWater via nightWatch) — the tier fog colors are daytime palettes;
+ *  terrain fog goes deep blue-black instead. */
+const NIGHT_MODE = NIGHT_ACTIVE
 
 function lerpAnchors(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
@@ -105,7 +107,7 @@ async function boot(): Promise<void> {
   const USE_PRO = PREFER_PRO && rendererPath === 'WebGPU'
 
   // Under Water Pro the per-pixel cost dominates. PIXEL BUDGET (§user:
-  // 11 fps on the 4K desktop): cap the render at ~2.4 MP — about
+  // 11 fps on the 4K desktop): cap the render at ~1.8 MP — just under
   // 1080p-and-a-half — and let the browser upscale. Slight softness on
   // huge monitors buys the frame rate back; small screens are untouched.
   const PIXEL_BUDGET = 1.8e6
@@ -223,6 +225,10 @@ async function boot(): Promise<void> {
   // Exiting drive keeps the tableau WITH the boat — a 3/4 pull-back shot
   // from wherever the run ended, never a glide home to the spawn point.
   const exitDriveTableau = () => {
+    // a drag begun before entering drive leaves the orbit latched — it
+    // would overwrite this pull-back tableau with a stale orbit around
+    // where the boat USED to be (final-swarm catch)
+    orbitActive = false
     const dx = Math.sin(boat.heading)
     const dz = -Math.cos(boat.heading)
     camRig.pos.set(
@@ -253,14 +259,18 @@ async function boot(): Promise<void> {
       scenePassColor,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) as any
-    // night runs the vendor moonlit bloom rig (2.7/0.5/0.75) — the moon
-    // glint-trail halo IS a bloom effect; day graph stays byte-identical
+    // night bloom, TAMED (final swarm: the vendor's 2.7@0.75 detonated —
+    // the moon disc peaks 0.90 linear and BYPASSES atmosphere exposure,
+    // glint spikes exceed 1.0, stars sit at 0.80: everything bloomed at
+    // once = the blinding light). Threshold 0.95 puts the disc and the
+    // stars below the knee; true HDR glints still halo gently at 1.0.
+    // Day graph stays byte-identical.
     const withBloom = waterOut.add(
       bloom(
         waterOut,
-        NIGHT_MODE ? 2.7 : 0.09,
-        NIGHT_MODE ? 0.5 : 0.3,
-        NIGHT_MODE ? 0.75 : 1.45,
+        NIGHT_MODE ? 1.0 : 0.09,
+        NIGHT_MODE ? 0.45 : 0.3,
+        NIGHT_MODE ? 0.95 : 1.45,
       ),
     )
     post.outputColorTransform = false
@@ -333,6 +343,10 @@ async function boot(): Promise<void> {
       if (driveMode) e.preventDefault()
     }
     if (e.key === 'Shift') input.boost = true
+    // W = boost too (§user: hammering Shift trips Windows Sticky Keys —
+    // five shift presses summon an OS dialog the browser cannot block;
+    // W gives the throttle hand a shift-free home)
+    if (e.key === 'w' || e.key === 'W') input.boost = true
     if (e.key === 'Control') input.superBoost = e.shiftKey
     if (e.key === 'z' || e.key === 'Z') input.ultraBoost = true
     if (e.code === 'Space') {
@@ -403,6 +417,7 @@ async function boot(): Promise<void> {
       input.boost = false
       input.superBoost = false
     }
+    if (e.key === 'w' || e.key === 'W') input.boost = false
     if (e.key === 'Control') input.superBoost = false
     if (e.key === 'z' || e.key === 'Z') input.ultraBoost = false
     if (e.code === 'Space') input.anchor = false
@@ -645,6 +660,9 @@ async function boot(): Promise<void> {
   // again.
   const camPrev = new THREE.Vector3()
   const camPrevQuat = new THREE.Quaternion()
+  let prevHeading = 0
+  let prevDh = 0
+  let sinceSteer = 0
   let syncFrames = 0
 
   // vendor-recommended (docs/guide/basic-example): precompile the scene's
@@ -726,7 +744,28 @@ async function boot(): Promise<void> {
       // must track the live camera or fast moves stamp stale copies
       // across the frame (the "seeing triple" regression)
       pro.updateSky(dt)
-      // camera teleport/whip? (position or attitude step this frame)
+      // camera teleport/whip? (position or attitude step this frame) —
+      // OR a steering WHIP: rapid L-R-L-R alternation flips the hull's
+      // yaw+bank sign every swing while the depth pass runs 1-2 frames
+      // stale — the lagging hull cutout in foam/fog reads as ghost
+      // boats. The whip's signature is the RATE SIGN REVERSAL (final
+      // swarm: a magnitude threshold provably can't work — whip frames
+      // and smooth-arc frames have identical per-frame magnitude), so
+      // sustained turns and straight running cost zero.
+      const dh = boat.heading - prevHeading
+      sinceSteer += dt
+      if (dh !== 0) {
+        if (
+          dh * prevDh < 0 &&
+          sinceSteer < 0.25 &&
+          Math.abs(dh) + Math.abs(prevDh) > 0.006
+        ) {
+          syncFrames = Math.max(syncFrames, 2)
+        }
+        prevDh = dh
+        sinceSteer = 0
+      }
+      prevHeading = boat.heading
       if (
         camera.position.distanceToSquared(camPrev) > 36 ||
         Math.abs(camera.quaternion.dot(camPrevQuat)) < 0.99
@@ -765,8 +804,10 @@ async function boot(): Promise<void> {
           } finally {
             waterBusy = false
           }
+          // decrement only on frames that truly ran a sync update — an
+          // in-flight async update must not eat the resync allowance
+          if (syncFrames > 0) syncFrames--
         }
-        if (syncFrames > 0) syncFrames--
       }
       // smooth the proxy's heave before the hull takes it — Water Pro's
       // own smoothing assumes 60Hz steps and passes jitter through at

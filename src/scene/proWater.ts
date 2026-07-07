@@ -8,6 +8,7 @@ import {
 } from '../threejs-water-pro'
 import { SkySystem, PRESETS as SKY_PRESETS } from '../threejs-sky-pro'
 import { LAKE_SCALE, waterDepth } from './lakeMap'
+import { NIGHT_ACTIVE } from '../core/nightWatch'
 import type { BoatSystem } from './boatSystem'
 
 /**
@@ -54,11 +55,12 @@ const WATER_QUALITY = new URLSearchParams(location.search).has('wqmedium')
   ? ('medium' as const)
   : ('high' as const)
 
-/** ?night — moonlit lake under procedural stars (swarm-verified recipe:
+/** Night — moonlit lake under procedural stars (swarm-verified recipe:
  *  moonlitNight sky preset + anti-solar moon lighting the water + a
  *  canvas starfield; weather bands keep driving waves/rain, but sky
- *  presets are frozen so no daylight preset can clobber the night). */
-const NIGHT = new URLSearchParams(location.search).has('night')
+ *  presets are frozen so no daylight preset can clobber the night).
+ *  Auto-engages on EST night (20:00–06:00); ?night / ?day override. */
+const NIGHT = NIGHT_ACTIVE
 
 /** Tileable equirect starfield, drawn once at boot — the night panorama
  *  samples UV-mapped sRGB and multiplies by intensity × skyDarkness, so
@@ -175,6 +177,7 @@ export class ProWater {
    *  exactly and stays silent. */
   private readonly sprayRig = new THREE.Object3D()
   private sprayPhase = 0
+  private lastFricBand = 0
   private rainAllowed = true
   private lastRainOn = false
   private readonly nightMode = NIGHT
@@ -237,6 +240,12 @@ export class ProWater {
       if (sk.nightSky?.intensity) sk.nightSky.intensity.value = 0.8
       const cov = sk.clouds?.coverage ?? sk.clouds?.shape?.coverage
       if (cov?.value !== undefined) cov.value = 0.35
+      // moon disc at HALF brightness (blinding-light autopsy: the disc
+      // term bypasses atmosphere exposure entirely — dim the SOURCE;
+      // moonIntensity stays 2.5 so clouds/ambient keep their moonlight)
+      if (sk.timeOfDay?.moonDiscBrightness?.value !== undefined) {
+        sk.timeOfDay.moonDiscBrightness.value = 0.5
+      }
     } else {
       p.liftCloudDeck(0)
     }
@@ -402,7 +411,7 @@ export class ProWater {
       lighting.ambient.intensity = 0.9
       lighting.sun.color.set('#cdd8ff') // cool moonlight
       if (lighting.sun.intensity?.value !== undefined) {
-        lighting.sun.intensity.value = 0.7
+        lighting.sun.intensity.value = 0.45 // glint trail, not a flare
       }
     }
 
@@ -416,7 +425,9 @@ export class ProWater {
     // scaling at 0.75x put fadeStart at ~480 m and muted the shore
     // treeline into gray soup (§user)
     const FOG_S = Math.max(0.55, LAKE_SCALE / 2.2)
-    p.water.fog.color = '#c4d2d8'
+    // day haze only — the night rig set '#474343' above and this line
+    // was silently clobbering it (final-swarm catch)
+    if (!NIGHT) p.water.fog.color = '#c4d2d8'
     p.water.fog.fadeStart = 1400 * FOG_S
     p.water.fog.fadeEnd = 9000 * FOG_S
     p.water.fog.fadePower = 1.0
@@ -831,10 +842,23 @@ export class ProWater {
       shallow = Math.min(1, Math.max(0.3, (d - 0.8) / 2.7))
     }
     // top-end swell trimmed (§user: 150 mph wake "slightly too big"):
-    // stern peaks at 1.15 not 1.4 — still a real wall, no basin-churner
+    // WORM-MONSTER TUNE (final swarm, decoded in-bundle): the vendor's
+    // injection is depth × RAW SPEED — 2.9× cruise energy at 150 mph
+    // into a fixed-friction field = the towering stern ridge. Fix is
+    // hyper-band-only so the CRUISE wake is byte-identical: friction
+    // 1.05 below 25 m/s rising to 1.65 at top speed (unconditionally
+    // stable — damped leapfrog, gamma·dt ≈ 0.028), stern depth sheds
+    // half its top-end, stamp widens to flatten the peak (~1/radius,
+    // stays >2 field texels).
+    const hyper = Math.min(1, Math.max(0, (speedMps - 25) / 42))
+    const fricBand = Math.round(hyper * 6)
+    if (fricBand !== this.lastFricBand) {
+      this.lastFricBand = fricBand
+      this.water.wake.friction = 1.05 + (fricBand / 6) * 0.6
+    }
     this.water.wake.updateGenerator(this.sternWakeId, {
-      depth: (0.62 + k * 0.33) * idle * shallow,
-      radius: 4.5 + k * 1.5,
+      depth: (0.62 + k * 0.33) * idle * shallow * (1 - 0.5 * hyper),
+      radius: 4.5 + k * 3.0,
     })
     this.water.wake.updateGenerator(this.bowWakeId, {
       depth: (0.4 + k * 0.18) * idle * shallow,
@@ -1035,7 +1059,7 @@ export class ProWater {
     // uniform multiply, one step per frame) — derive from RAW frame dt
     // for an fps-independent trail. 0.02^dt ≈ a ~4s visible foam wake
     // (the 0.0018 value killed the trail in ~2s: 'no foam off the
-    // stern'); friction 0.9 remains the stability backstop.
+    // stern'); the speed-banded friction (1.05-1.65) is the stability backstop.
     if (this.sternWakeId >= 0) {
       this.water.wake.foamPersistence = Math.pow(0.02, rawDt)
     }

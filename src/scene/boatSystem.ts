@@ -42,15 +42,21 @@ function makeFlagTexture(): THREE.CanvasTexture {
   g.fillStyle = '#8a1016'
   g.fillRect(0, 0, 256, 128)
   g.fillStyle = '#f4efe8'
-  g.font = '700 88px Georgia, "Times New Roman", serif'
+  // Traditional bitcoin B (§user: the B from the orange logo, sans the
+  // orange): heavy sans glyph + two vertical strokes protruding through
+  // top and bottom. Drawn manually — U+20BF is tofu on stock Android
+  // fonts and would bake permanently into the texture. Stub geometry
+  // (final swarm, Arial metrics): bars sink ~8 px INTO the cap/base
+  // strokes so they connect under any sans fallback, and never cross
+  // the B's counters (no white stripes in the red holes).
+  g.font = '900 96px "Arial Black", Arial, Helvetica, sans-serif'
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillText('B', 128, 68)
-  // the ₿ bars above and below the stem
-  g.fillRect(109, 6, 8, 20)
-  g.fillRect(127, 6, 8, 20)
-  g.fillRect(109, 102, 8, 20)
-  g.fillRect(127, 102, 8, 20)
+  g.fillText('B', 128, 64)
+  g.fillRect(112, 12, 10, 25)
+  g.fillRect(133, 12, 10, 25)
+  g.fillRect(112, 88, 10, 26)
+  g.fillRect(133, 88, 10, 26)
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
@@ -110,6 +116,8 @@ export class BoatSystem {
   /** Static running gear (shaft/rudder/exhausts) — shrunk toward the
    *  hull line at load so it reads as machinery, not a kitchen fork. */
   private readonly gearMeshes: THREE.Mesh[] = []
+  /** The flag staff — stretched down into the deck at load. */
+  private gearStaff: THREE.Mesh | null = null
   private propGroup: THREE.Group | null = null
   private readonly propAxis = new THREE.Vector3(1, 0, 0)
   private ready = false
@@ -161,6 +169,7 @@ export class BoatSystem {
       ) {
         this.gearMeshes.push(mesh)
       }
+      if (mesh.name === 'SternStaff') this.gearStaff = mesh
     })
 
     // face -z when heading = π (glTF -z forward after y-up export; our hull
@@ -203,14 +212,21 @@ export class BoatSystem {
       // identity here, so the resolved axes are exact.
       pg.scale.setScalar(0.7)
       const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize()
-      pg.translateOnAxis(this.propAxis, 0.28)
-      pg.translateOnAxis(localUp, 0.1)
+      // right up against the hull bottom (§user round 2: "bring the
+      // propeller up to the boat") — the shaft it used to hang from is
+      // hidden below
+      pg.translateOnAxis(this.propAxis, 0.45)
+      pg.translateOnAxis(localUp, 0.3)
     }
 
-    // static gear (shaft/rudder/exhaust tips): shrink each toward its
-    // TOP edge so it hugs the hull line — no gap opens where it meets
-    // the boat; same proven attach() math as the prop rig
+    // static gear: the dinky shaft stick is RETIRED outright (§user);
+    // rudder/exhausts shrink toward their TOP edges so they hug the
+    // hull line — same proven attach() math as the prop rig
     for (const m of this.gearMeshes) {
+      if (m.name === 'PropShaft') {
+        m.visible = false
+        continue
+      }
       const bb = new THREE.Box3().setFromObject(m)
       const pivotW = bb.getCenter(new THREE.Vector3())
       pivotW.y = bb.max.y
@@ -221,6 +237,24 @@ export class BoatSystem {
       g2.updateMatrixWorld(true)
       g2.attach(m)
       g2.scale.setScalar(m.name === 'Rudder' ? 0.75 : 0.8)
+    }
+
+    // flagpole planted IN the deck (§user: "connect the darn flagpole"):
+    // stretch the staff downward about its TOP so the base sinks into
+    // the transom while the tip and the cloth stay exactly where they
+    // were (the Flag mesh is separate — its TSL sway is untouched)
+    const staff = this.gearStaff
+    if (staff) {
+      const bb = new THREE.Box3().setFromObject(staff)
+      const pivotW = bb.getCenter(new THREE.Vector3())
+      pivotW.y = bb.max.y
+      const g3 = new THREE.Group()
+      const par = staff.parent as THREE.Object3D
+      par.add(g3)
+      g3.position.copy(par.worldToLocal(pivotW.clone()))
+      g3.updateMatrixWorld(true)
+      g3.attach(staff)
+      g3.scale.set(1, 1.3, 1)
     }
     this.ready = true
   }
@@ -481,7 +515,6 @@ export class BoatSystem {
       this.propGroup.rotateOnAxis(this.propAxis, revs)
     }
 
-    void input
   }
 
   /** Hard-locked drive camera pose for the active preset. */

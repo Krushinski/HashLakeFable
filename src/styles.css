@@ -1338,3 +1338,25 @@ body {
   color: #c3bba9;
   white-space: nowrap;
 }
+
+/* ---------- loader v3: the classy cut ---------- */
+/* wordmark, one gold hairline, the line of copy — rings and signal bar
+   retired (their rules above are inert without markup) */
+.loader-rule {
+  width: clamp(140px, 24vw, 260px);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(201, 162, 78, 0.75),
+    transparent
+  );
+}
+#loader.fallback .loader-rule {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(192, 96, 28, 0.7),
+    transparent
+  );
+}
