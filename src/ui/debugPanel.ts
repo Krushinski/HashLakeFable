@@ -39,7 +39,26 @@ export class DebugPanel {
     this.mapDock = document.createElement('div')
     this.mapDock.className = 'dbg-map'
     this.mapDock.innerHTML = '<h4>lake map</h4>'
+    // storm slider — drives the engine's existing manual override
+    // (manualMode/manualIndex). Lives OUTSIDE the 2 Hz innerHTML body so
+    // a drag never fights the repaint; "Resume live" hands back to data.
+    const stormDock = document.createElement('div')
+    stormDock.className = 'dbg-storm'
+    stormDock.innerHTML = '<h4>storm slider — drag to override</h4>'
+    const range = document.createElement('input')
+    range.type = 'range'
+    range.min = '0'
+    range.max = '100'
+    range.step = '1'
+    range.value = String(Math.round(weather.stormIndex))
+    range.style.width = '100%'
+    range.addEventListener('input', () => {
+      this.weather.manualMode = 'manual'
+      this.weather.manualIndex = Number(range.value)
+    })
+    stormDock.appendChild(range)
     this.el.appendChild(this.body)
+    this.el.appendChild(stormDock)
     this.el.appendChild(this.mapDock)
     document.body.appendChild(this.el)
     this.el.addEventListener('click', (e) => {
@@ -124,6 +143,7 @@ export class DebugPanel {
         <h4>dials</h4>
         ${bar('chop', w.dials.chop, Math.round(w.dials.chop * 100) + '%')}
         ${bar('wind', w.dials.wind, Math.round(w.dials.wind * 100) + '%')}
+        ${bar('gust', w.dials.gust, Math.round(w.dials.gust * 100) + '%')}
         ${bar('rain', w.dials.rain, Math.round(w.dials.rain * 100) + '%')}
         ${bar('lightning', w.dials.lightning, Math.round(w.dials.lightning * 100) + '%')}
         ${bar('sky dark', w.dials.skyDark, Math.round(w.dials.skyDark * 100) + '%')}

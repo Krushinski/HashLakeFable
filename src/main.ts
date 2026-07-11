@@ -35,7 +35,7 @@ import { DebugPanel } from './ui/debugPanel'
 import { LegendPanel } from './ui/legendPanel'
 import { MobileControls } from './ui/mobileControls'
 import { QualityGovernor } from './core/qualityGovernor'
-import { NIGHT_ACTIVE } from './core/nightWatch'
+import { nightWatch } from './core/nightWatch'
 
 const loader = document.getElementById('loader') as HTMLDivElement
 const loaderSub = document.getElementById('loader-sub') as HTMLParagraphElement
@@ -76,10 +76,12 @@ const TIER_VISUALS = {
  *  floored at 0.55: the atmosphere doesn't shrink with the map. */
 const FOG_WORLD = Math.max(0.55, LAKE_SCALE / 2.2)
 
-/** Night (EST auto or ?night/?day probes; shared single evaluation with
+/** Night (EST auto or ?night/?day probes; shared evaluation with
  *  proWater via nightWatch) — the tier fog colors are daytime palettes;
- *  terrain fog goes deep blue-black instead. */
-const NIGHT_MODE = NIGHT_ACTIVE
+ *  terrain fog goes deep blue-black instead. Mutable: a live nightWatch
+ *  flip re-assigns it from under the blackout (see the crossover rig in
+ *  boot()); Pro path only — the legacy world stays daytime. */
+let NIGHT_MODE = nightWatch.night
 
 function lerpAnchors(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
@@ -156,6 +158,15 @@ async function boot(): Promise<void> {
   const store = new LiveBitcoinStore()
   store.start()
   const weather = new WeatherEngine(store)
+  // ?storm=NN pins the engine to a manual index (the debug panel's storm
+  // slider does the same live) — the visible-storm work is untestable on
+  // a calm chain. Resume live via the debug panel's button.
+  const stormProbe = Number(new URLSearchParams(location.search).get('storm'))
+  if (Number.isFinite(stormProbe) && stormProbe > 0) {
+    weather.manualMode = 'manual'
+    weather.manualIndex = Math.min(100, stormProbe)
+    weather.stormIndex = Math.min(100, stormProbe) // skip the slow approach
+  }
 
   // ---------- camera ----------
   const camera = new THREE.PerspectiveCamera(
@@ -186,8 +197,21 @@ async function boot(): Promise<void> {
   }
   boat
     .load()
-    .then(() => pro?.attachBoat(boat))
+    .then(() => {
+      pro?.attachBoat(boat)
+      // running lights arm with the hull; Pro-only — the legacy fallback
+      // is a permanent daytime world (no night rig to match them)
+      if (pro) boat.setNavLights(nightWatch.night)
+    })
     .catch((err) => console.error('boat load failed:', err))
+
+  // lightning → sky: a strike without the dome answering reads as a
+  // sprite. Distance rides along for the future thunder audio (delay =
+  // distM / 343; NOT built yet — §task, hook only).
+  lightning.onStrike = (intensity, distM) => {
+    pro?.lightningPulse(intensity)
+    void distM
+  }
 
   // Opening shot (§user, last-day): the hero fills the frame — a low
   // three-quarter portrait from the boat's starboard-aft quarter, gaze
@@ -237,6 +261,8 @@ async function boot(): Promise<void> {
       boat.z - dz * 52 + dx * 20,
     )
     camRig.look.set(boat.x + dx * 30, 4, boat.z + dz * 30)
+    // a known cut — resync the water's lagged passes (see loop)
+    syncFrames = Math.max(syncFrames, 2)
   }
 
   // ---------- post ----------
@@ -264,17 +290,47 @@ async function boot(): Promise<void> {
     // glint spikes exceed 1.0, stars sit at 0.80: everything bloomed at
     // once = the blinding light). Threshold 0.95 puts the disc and the
     // stars below the knee; true HDR glints still halo gently at 1.0.
-    // Day graph stays byte-identical.
-    const withBloom = waterOut.add(
-      bloom(
-        waterOut,
-        NIGHT_MODE ? 1.0 : 0.09,
-        NIGHT_MODE ? 0.45 : 0.3,
-        NIGHT_MODE ? 0.95 : 1.45,
-      ),
+    // Day graph stays byte-identical. The node is kept: its knobs are
+    // uniforms, and the live crossover below re-tunes them on a flip.
+    const bloomNode = bloom(
+      waterOut,
+      NIGHT_MODE ? 1.0 : 0.09,
+      NIGHT_MODE ? 0.45 : 0.3,
+      NIGHT_MODE ? 0.95 : 1.45,
     )
+    const withBloom = waterOut.add(bloomNode)
     post.outputColorTransform = false
     post.outputNode = fxaa(renderOutput(withBloom))
+
+    // ---------- live dusk/dawn crossover ----------
+    // The night look is boot-shaped (sky presets, water slices, bloom
+    // knee), not a continuous cycle — so when the EST clock crosses a
+    // boundary with the page open, a ~2 s fade-to-black covers the
+    // re-rig instead of every consumer learning to crossfade.
+    // (nightWatch keeps a 0..1 dusk factor for the day they do.)
+    // Pro-only by construction: the legacy world has no night rig.
+    // z-index 30: over the canvas, under every UI layer (40+) — the
+    // WORLD goes dark, the pills stay lit.
+    const veil = document.createElement('div')
+    veil.style.cssText =
+      'position:fixed;inset:0;background:#000;opacity:0;' +
+      'pointer-events:none;transition:opacity 0.75s ease;z-index:30'
+    document.body.appendChild(veil)
+    nightWatch.onFlip((night) => {
+      veil.style.opacity = '1'
+      window.setTimeout(() => {
+        // full black: swap every rig while nobody's watching
+        NIGHT_MODE = night
+        pro.setNight(night)
+        boat.setNavLights(night)
+        bloomNode.strength.value = night ? 1.0 : 0.09
+        bloomNode.radius.value = night ? 0.45 : 0.3
+        bloomNode.threshold.value = night ? 0.95 : 1.45
+        window.setTimeout(() => {
+          veil.style.opacity = '0'
+        }, 550)
+      }, 800)
+    })
   } else {
     post.outputNode = scenePassColor.add(bloom(scenePassColor, 0.09, 0.3, 1.45))
   }
@@ -356,6 +412,8 @@ async function boot(): Promise<void> {
     if (e.key === 'x' || e.key === 'X') {
       driveMode = !driveMode
       if (!driveMode) exitDriveTableau()
+      // entering drive snaps to the hard-locked chase pose — same cut
+      syncFrames = Math.max(syncFrames, 2)
       toast.setMode(driveMode ? 'drive' : 'frame')
       speedo.setVisible(driveMode)
       updatePill()
@@ -402,6 +460,7 @@ async function boot(): Promise<void> {
       // R re-frames the OPENING hero shot around wherever the boat is now
       camRig.pos.set(boat.x + 14, 4.2, boat.z + 14)
       camRig.look.set(boat.x, 1.8, boat.z)
+      syncFrames = Math.max(syncFrames, 2)
     }
     if (e.key === 'Escape' && driveMode) {
       driveMode = false
@@ -445,6 +504,8 @@ async function boot(): Promise<void> {
   const applyFramePreset = (p: FramePreset) => {
     camRig.pos.set(boat.x + p.off[0], p.off[1], boat.z + p.off[2])
     camRig.look.set(boat.x + p.look[0], p.look[1], boat.z + p.look[2])
+    // preset cuts are the canonical teleport — resync the water's passes
+    syncFrames = Math.max(syncFrames, 2)
   }
 
   // ---------- frame-mode look-around (click-drag, §6.1 + user contract:
@@ -518,6 +579,8 @@ async function boot(): Promise<void> {
     toggleDrive: () => {
       driveMode = !driveMode
       if (!driveMode) exitDriveTableau()
+      // same cut as the X key — the chase pose snap needs a resync too
+      syncFrames = Math.max(syncFrames, 2)
       toast.setMode(driveMode ? 'drive' : 'frame')
       updatePill()
     },
@@ -535,12 +598,16 @@ async function boot(): Promise<void> {
     const d = weather.dials
 
     waveField.params.swellScale = lerpAnchors(TIER_VISUALS.swell, t)
+    // gust rides the envelope now (attack/hold/decay), not a square wave
     waveField.params.chopScale =
-      lerpAnchors(TIER_VISUALS.chop, t) * (weather.isGusting ? 1.35 : 1)
+      lerpAnchors(TIER_VISUALS.chop, t) * (1 + 0.35 * d.gust)
     waveField.params.choppiness = lerpAnchors(TIER_VISUALS.choppiness, t)
 
+    // flag + scarf answer the storm even parked
+    boat.weatherWind = weather.windSpeed01 + d.gust * 0.6
+
     if (pro) {
-      pro.applyWeatherRaw(t, d.skyDark)
+      pro.applyWeatherRaw(t, d.skyDark, d.rain, weather.windHeadingRad)
       // Sky Pro's physical atmosphere sits ~2.5x dimmer through ACES than
       // the legacy Preetham dome at the same exposure
       baseExposure =
@@ -566,7 +633,10 @@ async function boot(): Promise<void> {
     if (d.fireWeather > 0) {
       fog.color.lerp(new THREE.Color(0x3a140a), d.fireWeather * 0.6)
     }
-    if (NIGHT_MODE) fog.color.set(0x0b111c)
+    // Pro only: the legacy sky has no night mode, so night-tinting the
+    // fog handed WebGL-fallback visitors a noon sky over midnight haze —
+    // they keep the coherent daytime world instead
+    if (NIGHT_MODE && pro) fog.color.set(0x0b111c)
     const staleCrush = 1 - d.fog * 0.82
     fog.near = lerpAnchors(TIER_VISUALS.fogNear, t) * staleCrush * FOG_WORLD
     fog.far =
@@ -658,6 +728,12 @@ async function boot(): Promise<void> {
   // frames, and every consumer smears. Detect the jump, run the water
   // synchronously for a few frames so all passes re-align, go async
   // again.
+  // EVENT-DRIVEN RESYNC (renaissance): thresholds alone can't do it —
+  // the camera is doubly smoothed (orbit goal-chase, tableau damping),
+  // so real whips peak ~2-13°/frame and slid clean under the old
+  // step detector. Every KNOWN cut (preset switch, drive toggle, R
+  // re-frame, drive exit) now bumps syncFrames at the event itself,
+  // and an active orbit drag pins it for the whole gesture.
   const camPrev = new THREE.Vector3()
   const camPrevQuat = new THREE.Quaternion()
   let prevHeading = 0
@@ -695,7 +771,7 @@ async function boot(): Promise<void> {
     // storm theater
     if (driveMode) tmpFocus.set(boat.x, 0, boat.z)
     else tmpFocus.copy(camRig.pos)
-    rain.update(dt, tmpFocus, weather.dials.rain, weather.dials.wind)
+    rain.update(dt, tmpFocus, weather.dials.rain, weather.windX, weather.windZ)
     lightning.update(dt, weather.dials.lightning, boat.x, boat.z)
     fireSky.update(dt, weather.dials.fireWeather, tmpFocus)
 
@@ -762,13 +838,34 @@ async function boot(): Promise<void> {
         ) {
           syncFrames = Math.max(syncFrames, 2)
         }
+        // ...and the ONE-DIRECTIONAL whip: a hard HELD turn never
+        // reverses sign, so the reversal test sleeps through it while
+        // the hull cutout drags. Sustained yaw rate past ~half the
+        // boat's 1.05 rad/s max earns the same resync.
+        if (Math.abs(dh) > 0.5 * dt) syncFrames = Math.max(syncFrames, 2)
         prevDh = dh
         sinceSteer = 0
       }
       prevHeading = boat.heading
+      // an orbit drag is a whip in progress — pin the passes to the
+      // live camera for the whole gesture, not just its first frames
+      if (dragging && !driveMode) syncFrames = Math.max(syncFrames, 1)
+      // jump detector, tightened (renaissance): 0.99 asked for ~16°/frame
+      // while the smoothed camera peaks at 2-13° — 0.9995 (~3.6°/frame)
+      // catches the fast half of every glide. Position steps scale with
+      // framing: 6 m is a rounding error from the far cove and a
+      // teleport at deck distance, so near tableaux get (15% of the
+      // boat distance)² instead. Drive keeps the flat 36 — there the
+      // camera legitimately covers metres per frame at speed, and the
+      // steering detectors above own the whips.
+      const dxb = camera.position.x - boat.x
+      const dzb = camera.position.z - boat.z
+      const posJumpSq = driveMode
+        ? 36
+        : Math.min(36, 0.0225 * (dxb * dxb + dzb * dzb))
       if (
-        camera.position.distanceToSquared(camPrev) > 36 ||
-        Math.abs(camera.quaternion.dot(camPrevQuat)) < 0.99
+        camera.position.distanceToSquared(camPrev) > posJumpSq ||
+        Math.abs(camera.quaternion.dot(camPrevQuat)) < 0.9995
       ) {
         syncFrames = 3
       }

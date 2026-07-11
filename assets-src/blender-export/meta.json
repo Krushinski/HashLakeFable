@@ -1,0 +1,21 @@
+{
+  "frame": "meters; origin lake center; +X east; -Z north; water y=0. Blender: (x, -z, y)",
+  "lakeScale": 0.75,
+  "extent": 3840,
+  "gridN": 1537,
+  "waterLevel": 0,
+  "maxLakeDepth": 11,
+  "heightRange": [
+    -10.999999999964336,
+    624.6942644883139
+  ],
+  "island": {
+    "cx": -176.25,
+    "cz": 228.75,
+    "r": 116.25,
+    "crest": 2.6,
+    "landR": 55.5
+  },
+  "heightfield": "heightfield.f32 float32 little-endian, row-major, j=z rows i=x cols, [-extent/2..extent/2]",
+  "shoresdf": "shoresdf.f32 same layout; negative = inside lake"
+}

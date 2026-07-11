@@ -1,6 +1,6 @@
 export const buildInfo = {
   name: 'HashLake',
-  phase: 'Fable p1 — Hero Water',
+  phase: 'Renaissance p2 — Storms & Night',
   commit: __BUILD_COMMIT__,
   builtAt: __BUILD_TIME__,
 }

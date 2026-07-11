@@ -8,7 +8,7 @@ import {
 } from '../threejs-water-pro'
 import { SkySystem, PRESETS as SKY_PRESETS } from '../threejs-sky-pro'
 import { LAKE_SCALE, waterDepth } from './lakeMap'
-import { NIGHT_ACTIVE } from '../core/nightWatch'
+import { nightWatch } from '../core/nightWatch'
 import type { BoatSystem } from './boatSystem'
 
 /**
@@ -59,8 +59,22 @@ const WATER_QUALITY = new URLSearchParams(location.search).has('wqmedium')
  *  moonlitNight sky preset + anti-solar moon lighting the water + a
  *  canvas starfield; weather bands keep driving waves/rain, but sky
  *  presets are frozen so no daylight preset can clobber the night).
- *  Auto-engages on EST night (20:00–06:00); ?night / ?day override. */
-const NIGHT = NIGHT_ACTIVE
+ *  Auto-engages on EST night (20:00–06:00); ?night / ?day override.
+ *  BOOT SNAPSHOT — a live flip while the page is open arrives through
+ *  setNight() (main.ts's nightWatch listener, under its blackout). */
+const NIGHT = nightWatch.night
+
+/** Synodic moon phase from the wall clock (0 = new, 0.5 = full, 1 = new
+ *  again — the sky lib's own convention), anchored at the 2000-01-06
+ *  18:14 UTC new moon. Epoch arithmetic drifts under half a day against
+ *  the true ephemeris — invisible at our oversized disc. */
+const MOON_SYNODIC_DAYS = 29.530588853
+const MOON_EPOCH_UTC = Date.UTC(2000, 0, 6, 18, 14)
+const MOON_PHASE =
+  (((Date.now() - MOON_EPOCH_UTC) / 86_400_000) % MOON_SYNODIC_DAYS) /
+  MOON_SYNODIC_DAYS
+/** Lit disc fraction — same linear map the sky shader derives per frame. */
+const MOON_ILLUM = 1 - Math.abs(2 * MOON_PHASE - 1)
 
 /** Tileable equirect starfield, drawn once at boot — the night panorama
  *  samples UV-mapped sRGB and multiplies by intensity × skyDarkness, so
@@ -141,6 +155,20 @@ const CASCADES = {
  *  partly-cloudy. */
 const SKY_TIERS = ['pixar', 'partlyCloudy', 'hazy', 'stormyEvening', 'thunderstorm'] as const
 
+/** Cloud coverage/density anchors per sky band, written EVERY frame as
+ *  direct uniform writes (the liftCloudDeck-proven path) so the deck
+ *  thickens continuously between the discrete preset swaps. Anchors 0-3
+ *  are the preset-authored values, so the ramp lands exactly on each
+ *  incoming preset at the band handoff — no snap. Anchor 4 overshoots
+ *  thunderstorm's authored 0.59/0.008 on purpose: the vendor preset gets
+ *  its menace from haze we don't ramp, and Apocalyptic must read BLACK. */
+const SKY_COVERAGE = [0.47, 0.49, 0.5, 0.65, 0.78]
+const SKY_DENSITY = [0.05, 0.019, 0.002, 0.007, 0.012]
+
+/** FFT wind heading fallback (radians) — the heading the lake was tuned
+ *  under; the weather engine's live veering heading replaces it per call. */
+const DEFAULT_WIND_RAD = THREE.MathUtils.degToRad(130)
+
 function lerpA(arr: number[], t: number): number {
   const i = Math.min(arr.length - 2, Math.floor(t))
   const f = Math.min(1, t - i)
@@ -179,8 +207,26 @@ export class ProWater {
   private sprayPhase = 0
   private lastFricBand = 0
   private rainAllowed = true
-  private lastRainOn = false
-  private readonly nightMode = NIGHT
+  /** Last written rain level, quantized to 1/20 — per-frame calls stay a
+   *  comparison until the dial actually moves. */
+  private lastRainQ = 0
+  /** Sky preset sequence token + serializing chain: applyPreset is async
+   *  and the band can flap at a boundary — without these, two in-flight
+   *  presets interleave their uniform writes and the post-preset dims
+   *  compound. */
+  private skySeq = 0
+  private skyChain: Promise<void> = Promise.resolve()
+  /** Lightning kick envelope (0..1) + the pulse-free baselines it must
+   *  restore — see lightningPulse(). */
+  private boltPulse = 0
+  private boltExpoBase = 1
+  private boltAmbientBase = 1
+  /** Live night state — boot snapshot until a nightWatch flip calls
+   *  setNight() from under main.ts's blackout. */
+  private nightMode = NIGHT
+  /** Night glint budget, moon-phased: full moon keeps the tuned 0.45
+   *  trail, new moon starves it to a whisper (stars own the frame). */
+  private readonly moonGlint = 0.45 * (0.1 + 0.9 * MOON_ILLUM)
   private boatRef: BoatSystem | null = null
   private envBaker: { enabled: boolean; bakeAll(): void } | null = null
 
@@ -225,27 +271,19 @@ export class ProWater {
       // 24 km camera.far and silently never renders — 15 km is inside;
       // occlusion is safe (its fragment depth is forced to the far
       // plane). Passing nightSky ALSO activates the bundled moon texture.
-      ...(NIGHT && {
-        nightSky: { texture: makeStarfieldTexture(), radius: 15000, intensity: 0.8 },
-      }),
+      // Created on BOTH boots now (a live dusk flip needs the starfield
+      // on hand) — the lib's per-frame visibility cull keeps the mesh
+      // hidden in full daylight, so day pays only the boot-time canvas.
+      nightSky: {
+        texture: makeStarfieldTexture(),
+        radius: 15000,
+        intensity: 0.8,
+      },
     })
     console.log('[boot] sky:preset')
     await p.sky.applyPreset(NIGHT ? SKY_PRESETS.moonlitNight : SKY_PRESETS.pixar)
     if (NIGHT) {
-      // the preset clobbers star intensity to 0.05 (calibrated for HDR
-      // starmaps, not our 8-bit canvas) and ships coverage 0.6 (cloudy
-      // night hides the stars) — re-assert both
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sk = p.sky as any
-      if (sk.nightSky?.intensity) sk.nightSky.intensity.value = 0.8
-      const cov = sk.clouds?.coverage ?? sk.clouds?.shape?.coverage
-      if (cov?.value !== undefined) cov.value = 0.35
-      // moon disc at HALF brightness (blinding-light autopsy: the disc
-      // term bypasses atmosphere exposure entirely — dim the SOURCE;
-      // moonIntensity stays 2.5 so clouds/ambient keep their moonlight)
-      if (sk.timeOfDay?.moonDiscBrightness?.value !== undefined) {
-        sk.timeOfDay.moonDiscBrightness.value = 0.5
-      }
+      p.assertNightSky()
     } else {
       p.liftCloudDeck(0)
     }
@@ -338,8 +376,10 @@ export class ProWater {
     // night stars: the provider mesh list excludes the panorama — add it
     // ourselves, keep scene fog off the 15 km sphere (the historic
     // fog-on-sky bug on a new mesh), and keep it out of the water's aux
-    // passes like every other animated/transparent overlay
-    if (NIGHT && p.sky.nightSkyMesh) {
+    // passes like every other animated/transparent overlay. Added on
+    // day boots too: the lib's updateVisibility() hides it until
+    // skyDarkness rises, so it costs nothing until a real dusk.
+    if (p.sky.nightSkyMesh) {
       const nm = p.sky.nightSkyMesh
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(nm.material as any).fog = false
@@ -375,8 +415,9 @@ export class ProWater {
     // a touch brighter since our shallows are where the eye lives.
     p.water.floor.setVisible(false)
     p.water.floor.caustics.scale = 34
-    // white sand carries caustics; moonlight doesn't burn them in
-    p.water.floor.caustics.intensity = NIGHT ? 0.4 : 1.15
+    // day brightness; the night rig (applyNightWaterRig below) dims it —
+    // white sand carries caustics, moonlight doesn't burn them in
+    p.water.floor.caustics.intensity = 1.15
     p.water.floor.caustics.waveDistortion = 0.28
 
     // THE PINK SUN (red-hunt, certainty-grade): the vendor's lighting
@@ -397,23 +438,9 @@ export class ProWater {
     lighting.ambient.groundColor.set(0xabe0f2)
     lighting.ambient.intensity = 1.3
 
-    // ?night: moonlit water slices (vendor moonlit preset values, applied
-    // AFTER the daylight rig so they win; the per-frame lighting sync
-    // reads these sources). Waves/wake/foam/fresnel/SSR keep OUR tune.
-    if (NIGHT) {
-      p.water.color.absorptionColor = '#161313'
-      p.water.color.transmissionColor = '#ffffff'
-      p.water.color.waterColor = '#182325'
-      p.water.sss.intensity = 0.2
-      p.water.fog.color = '#474343'
-      lighting.ambient.skyColor.set('#5a6a85')
-      lighting.ambient.groundColor.set('#1b2238')
-      lighting.ambient.intensity = 0.9
-      lighting.sun.color.set('#cdd8ff') // cool moonlight
-      if (lighting.sun.intensity?.value !== undefined) {
-        lighting.sun.intensity.value = 0.45 // glint trail, not a flare
-      }
-    }
+    // night: the moonlit water rig lands ONCE at the end of this tune
+    // (applyNightWaterRig — shared with the live dusk flip) so it wins
+    // over every daylight write below.
 
     // dusk's warm-brown atmospheric fog repaints the whole basin — pull
     // it back to a thin alpine haze. (The old 'startDistance'/'start'
@@ -425,9 +452,9 @@ export class ProWater {
     // scaling at 0.75x put fadeStart at ~480 m and muted the shore
     // treeline into gray soup (§user)
     const FOG_S = Math.max(0.55, LAKE_SCALE / 2.2)
-    // day haze only — the night rig set '#474343' above and this line
-    // was silently clobbering it (final-swarm catch)
-    if (!NIGHT) p.water.fog.color = '#c4d2d8'
+    // day haze — the night rig's '#474343' is applied AFTER this tune
+    // (it used to sit above and get silently clobbered: final-swarm catch)
+    p.water.fog.color = '#c4d2d8'
     p.water.fog.fadeStart = 1400 * FOG_S
     p.water.fog.fadeEnd = 9000 * FOG_S
     p.water.fog.fadePower = 1.0
@@ -592,13 +619,10 @@ export class ProWater {
     // stealing hull pixels.
     p.water.fresnel.refractionStrength = 0.16
     p.water.fresnel.normalStrength = 1.25
-    // night re-assert: the teal day-tune above must not win at night
-    // (caught live: absorption read the day value under ?night)
-    if (NIGHT) {
-      p.water.color.absorptionColor = '#161313'
-      p.water.color.transmissionColor = '#ffffff'
-      p.water.color.waterColor = '#182325'
-    }
+    // night rig, applied LAST so the teal day-tune above can't win at
+    // night (caught live once: absorption read the day value under
+    // ?night) — the same method a live dusk flip calls at runtime
+    if (NIGHT) p.applyNightWaterRig()
 
     // Water Pro rain: WIRED TO THE STORM (final push) — ripple rings +
     // particles arrive with the network's rain, handled per-band in
@@ -870,8 +894,14 @@ export class ProWater {
     this.water.ssr.strength = 0.3 - k * 0.12
   }
 
-  /** Bitcoin weather → spectrum + sky. Called from the tier applier. */
-  applyWeatherRaw(tierT: number, skyDark: number): void {
+  /** Bitcoin weather → spectrum + sky. Called from the tier applier
+   *  every frame; heavy writes are band/quantum-gated inside. */
+  applyWeatherRaw(
+    tierT: number,
+    skyDark: number,
+    rain = 0,
+    windHeadingRad = DEFAULT_WIND_RAD,
+  ): void {
     const waveBand = Math.round(tierT * 4)
     if (waveBand !== this.lastWaveBand) {
       this.lastWaveBand = waveBand
@@ -881,9 +911,10 @@ export class ProWater {
         amplitude: lerpA(WATER_TIERS.amplitude, tierT),
         windSpeed: lerpA(WATER_TIERS.windSpeed, tierT),
         // RADIANS, not degrees (verified in lib: no degToRad on this
-        // path) — the old literal 130 was ~20.7 full turns, i.e. an
-        // effectively arbitrary wind heading every spectrum recompute
-        windDirection: THREE.MathUtils.degToRad(130),
+        // path). The heading is the weather engine's unified wind —
+        // veers ±15° with storm build; band-gated like the rest of the
+        // spectrum params (a recompute per veer-degree buys nothing).
+        windDirection: windHeadingRad,
         choppiness: lerpA(WATER_TIERS.choppiness, tierT),
         gravity: 9.81,
         jonswapGamma: 3.3,
@@ -897,6 +928,21 @@ export class ProWater {
         wavelengthSpread: 1.6,
         directionalSpread: 0.9,
       })
+
+      // STORM FOAM (visible-storm pass): the shores cap wave height, so
+      // FOAM carries the menace. Deposits break easier and hit harder as
+      // the tier climbs, and the crest field decays slower + stretches
+      // along the wind — Apocalyptic reads as wind-torn streaked lacework
+      // instead of taller water we can't afford. Tier-0 values are
+      // byte-identical to the create()-time constants above.
+      const stormT = tierT / 4
+      this.water.wake.foamStrength = 1.25 + stormT * 1.05
+      this.water.wake.foamBreakThreshold = 0.06 - stormT * 0.04
+      const fw = this.water.foam.waves
+      fw.windStretch = 0.42 + stormT * 0.45
+      fw.persistence.crestStrength = 0.95 + stormT * 0.75
+      fw.persistence.windwardStrength = 1.1 + stormT * 0.5
+      fw.persistence.decayTime = 0.5 + stormT * 2.2
 
       // STORM LIGHT RIG (swarm audit): the create()-time blackFlag
       // daylight otherwise persists through Apocalyptic — a 1.3
@@ -935,15 +981,36 @@ export class ProWater {
         )
         this.water.fog.fadeStart = 1400 * FOG_S2 * (1 - 0.5 * stormMix)
         this.water.fog.fadeEnd = 9000 * FOG_S2 * (1 - 0.5 * stormMix)
+        // keep the lightning kick's restore target in step with the rig
+        this.boltAmbientBase = lighting.ambient.intensity
+      } else {
+        // NIGHT-SAFE STORM: the moonlit rig owns the palette, but a
+        // storm still swallows the moon — the glint sun (moonGlint: the
+        // tuned 0.45 scaled by the real lunar phase) sheds up to 40% at
+        // high tier, so the trail dims under the thickening deck
+        // instead of shining through it
+        const stormMix = Math.max(0, Math.min(1, (tierT - 1.5) / 2.5))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lighting = this.water.lighting as any
+        if (lighting.sun.intensity?.value !== undefined) {
+          lighting.sun.intensity.value = this.moonGlint * (1 - 0.4 * stormMix)
+        }
       }
     }
 
-    const skyBand = Math.min(4, Math.floor(tierT + skyDark))
+    const skyT = Math.min(4, tierT + skyDark)
+    const skyBand = Math.floor(skyT)
     if (!this.nightMode && skyBand !== this.lastSkyBand) {
       this.lastSkyBand = skyBand
-      void this.sky
-        .applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
-        .then(() => {
+      // BAND-FLAP GUARD: presets are applied through a serializing chain
+      // (no two applyPreset calls interleave their async uniform writes)
+      // and the token drops every post-preset pass but the latest — the
+      // exposure *= below must never compound across a flap.
+      const seq = ++this.skySeq
+      this.skyChain = this.skyChain
+        .then(async () => {
+          await this.sky.applyPreset(SKY_PRESETS[SKY_TIERS[skyBand]])
+          if (seq !== this.skySeq) return
           this.liftCloudDeck(skyBand)
           // WHITE STORM SKY, cause #1 (swarm audit): the vendor storm
           // presets ship full DAYLIGHT source radiance (thunderstorm:
@@ -956,21 +1023,173 @@ export class ProWater {
           const s = this.sky as any
           s.atmosphere.exposure.value *= [1, 1, 0.85, 0.55, 0.35][skyBand]
           s.sun.peakIntensity *= [1, 1, 0.92, 0.72, 0.5][skyBand]
+          // the lightning kick restores to whatever the band last wrote
+          this.boltExpoBase = s.atmosphere.exposure.value
           // rebake reflections NEXT frame — not up to 6 s of sunny water
           // under a black sky
           this.envRefresh = 7
         })
+        .catch((err) => console.error('sky preset failed:', err))
     }
 
-    // Water Pro surface rain rides the storm: ripple rings + falling
-    // streaks from Violent upward (tierT ≥ 2.4 tracks the network's
-    // rain dial crossing ~0.4)
-    const rainOn = this.rainAllowed && tierT >= 2.4
-    if (rainOn !== this.lastRainOn) {
-      this.lastRainOn = rainOn
-      this.water.rain.particles.enabled = rainOn
-      this.water.rain.ripples.enabled = rainOn
+    // CONTINUOUS DARKENING: the preset ladder snaps at band boundaries —
+    // between them the deck thickens EVERY frame by direct uniform write
+    // (the liftCloudDeck-proven path; presets re-write these uniforms
+    // async, and the next frame's write wins). At night the ladder is
+    // frozen (moonlit rig) but the deck still closes in over the stars.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const shape = (this.sky as any).clouds?.shape
+    if (shape?.coverage?.value !== undefined) {
+      if (this.nightMode) {
+        // baseline is the boot-asserted 0.35 (starlight through a thin
+        // deck) and moonlitNight's 0.009 density
+        const nightStorm = Math.min(1, tierT / 4 + skyDark * 0.2)
+        shape.coverage.value = 0.35 + 0.45 * nightStorm
+        shape.density.value = 0.009 + 0.005 * nightStorm
+      } else {
+        shape.coverage.value = lerpA(SKY_COVERAGE, skyT)
+        shape.density.value = lerpA(SKY_DENSITY, skyT)
+      }
     }
+
+    // Water Pro surface rain rides the network's RAIN DIAL (0 at
+    // stormIndex 55, saturating at 85) — the same ramp as the screen
+    // rain streaks, replacing the old tierT ≥ 2.4 binary (which actually
+    // fired at stormIndex 60 while its comment claimed dial ~0.4).
+    // Intensity scales streak count; density/strength scale the rings
+    // from a drizzle floor past the vendor storm preset (2 / 0.55).
+    const rainQ = this.rainAllowed ? Math.round(Math.min(1, rain) * 20) / 20 : 0
+    if (rainQ !== this.lastRainQ) {
+      this.lastRainQ = rainQ
+      const on = rainQ > 0
+      this.water.rain.particles.enabled = on
+      this.water.rain.ripples.enabled = on
+      if (on) {
+        this.water.rain.particles.intensity = 0.2 + 0.8 * rainQ
+        this.water.rain.ripples.density = 0.6 + 1.4 * rainQ
+        this.water.rain.ripples.strength = 0.4 + 0.25 * rainQ
+      }
+    }
+  }
+
+  /** Lightning kick (visible-storm pass): one strike's flash on the DOME
+   *  and the water's fill light — the bolt mesh alone reads as a sprite;
+   *  the sky answering is what sells the strike. Called from main.ts's
+   *  onStrike hook; the envelope decays in updateSky(). */
+  lightningPulse(strength: number): void {
+    if (this.boltPulse <= 0) {
+      // capture pulse-free baselines: exposure is band-dimmed, ambient is
+      // rig-owned — both must restore to whatever the bands last wrote
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.boltExpoBase = (this.sky as any).atmosphere.exposure.value
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.boltAmbientBase = (this.water.lighting as any).ambient.intensity
+    }
+    this.boltPulse = Math.max(this.boltPulse, Math.min(1, strength))
+  }
+
+  /** LIVE dusk/dawn crossover — main.ts's nightWatch listener calls this
+   *  from under its fade-to-black when the EST clock crosses a boundary
+   *  with the page open. Re-points every boot-time night/day decision
+   *  this class owns; the blackout hides the preset snap. A real
+   *  continuous cycle would retire this in favor of per-frame blends
+   *  driven by nightWatch.factor. */
+  setNight(night: boolean): void {
+    if (night === this.nightMode) return
+    this.nightMode = night
+    if (night) {
+      // moonlit sky through the serializing chain (same flap guard as
+      // the day ladder — an in-flight day preset must not interleave)
+      const seq = ++this.skySeq
+      this.skyChain = this.skyChain
+        .then(async () => {
+          await this.sky.applyPreset(SKY_PRESETS.moonlitNight)
+          if (seq !== this.skySeq) return
+          this.assertNightSky()
+          // the lightning kick restores to the preset-fresh exposure
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          this.boltExpoBase = (this.sky as any).atmosphere.exposure.value
+          // moonlit reflections NEXT frame, not in up to 6 s
+          this.envRefresh = 7
+        })
+        .catch((err) => console.error('sky preset failed:', err))
+      this.applyNightWaterRig()
+    } else {
+      this.applyDayWaterRig()
+    }
+    // wake both band appliers: the next applyWeatherRaw (every frame)
+    // re-runs the wave rig (night-safe vs day storm lights) and, by
+    // day, the whole preset ladder + storm light rig at the live tier
+    this.lastWaveBand = -1
+    this.lastSkyBand = -1
+  }
+
+  /** The moonlitNight preset's post-apply corrections — boot AND live
+   *  flip. The preset clobbers star intensity to 0.05 (calibrated for
+   *  HDR starmaps, not our 8-bit canvas), ships coverage 0.6 (a cloudy
+   *  night hides the stars), a blinding moon disc, and a HARDCODED
+   *  moon phase of 0.19 — re-assert all four. */
+  private assertNightSky(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sk = this.sky as any
+    // stars brighten a touch as the moon wanes — new-moon nights belong
+    // to the Milky Way
+    if (sk.nightSky?.intensity) {
+      sk.nightSky.intensity.value = 0.8 + 0.2 * (1 - MOON_ILLUM)
+    }
+    const cov = sk.clouds?.coverage ?? sk.clouds?.shape?.coverage
+    if (cov?.value !== undefined) cov.value = 0.35
+    // moon disc at HALF brightness (blinding-light autopsy: the disc
+    // term bypasses atmosphere exposure entirely — dim the SOURCE;
+    // moonIntensity stays 2.5 so clouds/ambient keep their moonlight)
+    if (sk.timeOfDay?.moonDiscBrightness?.value !== undefined) {
+      sk.timeOfDay.moonDiscBrightness.value = 0.5
+    }
+    // the REAL moon phase, from the clock: the SunDriver re-derives the
+    // disc terminator + illumination from this uniform every frame, so
+    // one write is the whole feature
+    if (sk.timeOfDay?.moonPhase?.value !== undefined) {
+      sk.timeOfDay.moonPhase.value = MOON_PHASE
+    }
+  }
+
+  /** Moonlit water slices (vendor moonlit preset values; the per-frame
+   *  lighting sync reads these sources) — boot AND live flip. Waves/
+   *  wake/foam/fresnel/SSR keep OUR tune. Ambient + glint ride the real
+   *  lunar phase: full moon is bright glitter on the trail, new moon is
+   *  star-dark water. */
+  private applyNightWaterRig(): void {
+    this.water.color.absorptionColor = '#161313'
+    this.water.color.transmissionColor = '#ffffff'
+    this.water.color.waterColor = '#182325'
+    this.water.sss.intensity = 0.2
+    this.water.fog.color = '#474343'
+    // white sand carries caustics; moonlight doesn't burn them in
+    this.water.floor.caustics.intensity = 0.4
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lighting = this.water.lighting as any
+    lighting.ambient.skyColor.set('#5a6a85')
+    lighting.ambient.groundColor.set('#1b2238')
+    lighting.ambient.intensity = 0.9 * (0.4 + 0.6 * MOON_ILLUM)
+    lighting.sun.color.set('#cdd8ff') // cool moonlight
+    if (lighting.sun.intensity?.value !== undefined) {
+      lighting.sun.intensity.value = this.moonGlint // trail, not a flare
+    }
+    // the lightning kick restores ambient to whatever the rig owns
+    this.boltAmbientBase = lighting.ambient.intensity
+  }
+
+  /** Dawn flip only — the day water slices, mirroring the create()-time
+   *  tune (the essays live there; keep the numbers in step). Lighting +
+   *  fog re-assert themselves through the tier band rig the moment
+   *  setNight clears lastWaveBand. */
+  private applyDayWaterRig(): void {
+    this.water.color.absorptionColor = '#ff5a2e'
+    this.water.color.transmissionColor = '#3cb69c'
+    this.water.color.waterColor = '#0d4554'
+    this.water.sss.intensity = 0.35
+    this.water.sss.power = 0.85
+    this.water.floor.caustics.intensity = 1.15
   }
 
   /** Calm/mild skies ride a HIGHER cloud deck: preset bases (~1400 m)
@@ -1010,6 +1229,26 @@ export class ProWater {
       if (moonDir) this.water.lighting.sun.direction.value.copy(moonDir)
     } else if (skySun?.direction?.value) {
       this.water.lighting.sun.direction.value.copy(skySun.direction.value)
+    }
+    // lightning kick: dome exposure +40% and water ambient +50% at full
+    // pulse, decaying over ~0.4 s (the double-strike flicker lives in the
+    // bolt's own envelope; this is the sky answering). Writes ride on top
+    // of the band-owned baselines and restore them exactly at zero.
+    if (this.boltPulse > 0) {
+      const e = this.boltPulse
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(this.sky as any).atmosphere.exposure.value =
+        this.boltExpoBase * (1 + 0.4 * e)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(this.water.lighting as any).ambient.intensity =
+        this.boltAmbientBase * (1 + 0.5 * e)
+      this.boltPulse = Math.max(0, this.boltPulse - dt / 0.4)
+      if (this.boltPulse === 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(this.sky as any).atmosphere.exposure.value = this.boltExpoBase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(this.water.lighting as any).ambient.intensity = this.boltAmbientBase
+      }
     }
     // refresh the reflection PMREM from the sky at a low cadence (6s —
     // at 1.5s the PMREM prefilter spiked the GPU like clockwork). The

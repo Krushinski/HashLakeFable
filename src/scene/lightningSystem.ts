@@ -90,8 +90,10 @@ export class LightningSystem {
   private strike: Strike | null = null
   private nextIn = 6
   private rand = seededRandom(60660)
-  /** Hook for thunder audio etc. — called with 0..1 apparent intensity. */
-  onStrike: ((intensity: number) => void) | null = null
+  /** Hook for sky-kick + future thunder audio — called with 0..1 apparent
+   *  intensity and the strike's ground distance in metres (thunder wants
+   *  the raw distance for delay/volume when audio lands). */
+  onStrike: ((intensity: number, distanceM: number) => void) | null = null
 
   constructor(scene: THREE.Scene) {
     this.flashLight = new THREE.DirectionalLight(0xb8c8ff, 0)
@@ -146,10 +148,13 @@ export class LightningSystem {
     this.nextIn -= dt * intensity
     if (this.nextIn > 0) return
 
-    // fire a strike at a dramatic distance from the viewer
+    // fire a strike at a dramatic distance from the viewer — and the
+    // storm crowds in: the minimum closes from 500 m to 150 m as the
+    // dial climbs, so Apocalyptic bolts land close enough to matter
     this.nextIn = 3.5 + this.rand() * 9
     const ang = this.rand() * Math.PI * 2
-    const dist = 500 + this.rand() * 1100
+    const minDist = 500 - 350 * Math.min(1, intensity)
+    const dist = minDist + this.rand() * 1100
     const x = focusX + Math.sin(ang) * dist
     const z = focusZ + Math.cos(ang) * dist
     const topY = 550 + this.rand() * 260
@@ -164,7 +169,7 @@ export class LightningSystem {
       x,
       z,
     }
-    // closer strike = louder thunder
-    this.onStrike?.(Math.max(0.25, 1 - dist / 1800))
+    // closer strike = louder thunder, brighter sky kick
+    this.onStrike?.(Math.max(0.25, 1 - dist / 1800), dist)
   }
 }

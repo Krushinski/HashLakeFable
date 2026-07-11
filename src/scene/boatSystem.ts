@@ -108,11 +108,17 @@ export class BoatSystem {
   private hopEnergy = 0
 
   private readonly uFlagWind = uniform(1)
+  /** Weather engine's wind + gust contribution to the cloth sway —
+   *  main.ts writes it each frame so the flag answers the storm even
+   *  with the boat parked. */
+  weatherWind = 0
   /** Exhaust tips — shrunk toward the hull line at load. (The prop,
    *  shaft, and rudder are DELETED entirely: §user, final word.) */
   private readonly gearMeshes: THREE.Mesh[] = []
   /** The flag staff — stretched down into the deck at load. */
   private gearStaff: THREE.Mesh | null = null
+  /** Night running lights — built at load, shown via setNavLights(). */
+  private navRig: THREE.Group | null = null
   private ready = false
 
   constructor(
@@ -206,7 +212,67 @@ export class BoatSystem {
       g3.attach(staff)
       g3.scale.set(1, 1.3, 1)
     }
+
+    this.buildNavLights()
     this.ready = true
+  }
+
+  /** Night navigation lights — COLREGS closeness on a toy: port red /
+   *  starboard green at the bow cheeks, a white all-round lamp at the
+   *  flag-staff tip, and a warm puddle light over the transom so the
+   *  deck (and whatever near water listens to scene lights) reads at
+   *  night. Emissive 2.5-3+ clears the night bloom knee (0.95, main.ts)
+   *  for free halos. Group-local axes: +z = bow, +x = port — the same
+   *  frame the wake generators and spray probes use. Built invisible;
+   *  main.ts flips visibility from the nightWatch state (Pro path only —
+   *  the legacy world stays daytime). */
+  private buildNavLights(): void {
+    const rig = new THREE.Group()
+    rig.visible = false
+    const lamp = (
+      color: number,
+      intensity: number,
+      radius: number,
+      x: number,
+      y: number,
+      z: number,
+    ): void => {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 12, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0x101010, // near-black housing by any stray light
+          emissive: new THREE.Color(color),
+          emissiveIntensity: intensity,
+        }),
+      )
+      m.position.set(x, y, z)
+      rig.add(m)
+    }
+    // sidelights ride the bow cheeks just above the sheer line (the
+    // spray probes sit at ±0.62 on the same cheeks, at the waterline)
+    lamp(0xff2418, 2.6, 0.055, 0.66, 0.52, 1.95) // port — red
+    lamp(0x1aff4d, 2.6, 0.055, -0.66, 0.52, 1.95) // starboard — green
+    // white 360° stern light at the flag-staff tip — measured off the
+    // stretched staff so it lands on the actual masthead (the group is
+    // still at identity during load, so world bounds ARE group-local)
+    const tip = new THREE.Vector3(0, 1.75, -2.6)
+    if (this.gearStaff) {
+      const bb = new THREE.Box3().setFromObject(this.gearStaff)
+      bb.getCenter(tip)
+      tip.y = bb.max.y + 0.06
+    }
+    lamp(0xfff6e0, 3.2, 0.07, tip.x, tip.y, tip.z)
+    // warm low puddle over the transom — small range, believable spill
+    const glow = new THREE.PointLight(0xffc27a, 6, 9, 2)
+    glow.position.set(0, 1.5, -1.9)
+    rig.add(glow)
+    this.navRig = rig
+    this.group.add(rig)
+  }
+
+  /** Show/hide the running lights — main.ts gates on nightWatch + Pro. */
+  setNavLights(on: boolean): void {
+    if (this.navRig) this.navRig.visible = on
   }
 
   /** Flag cloth sway — distance-weighted sine ripple, wind/speed driven. */
@@ -452,9 +518,9 @@ export class BoatSystem {
     this.group.rotateX(this.pitch - this.bowLift)
     this.group.rotateZ(this.roll)
 
-    // flag wind: base breeze + speed
+    // flag wind: base breeze + speed + the weather engine's wind/gust
     this.uFlagWind.value = 0.6 + Math.min(2.2, Math.abs(this.speed) * 0.06) +
-      this.waveField.params.chopScale * 0.4
+      this.waveField.params.chopScale * 0.4 + this.weatherWind * 0.8
 
   }
 

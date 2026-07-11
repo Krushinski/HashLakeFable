@@ -30,7 +30,10 @@ export class RainSystem {
   private readonly positions = instancedArray(MAX_DROPS, 'vec3')
   private readonly computeInit: THREE.ComputeNode
   private readonly computeUpdate: THREE.ComputeNode
-  private readonly uWind = uniform(0)
+  /** XZ wind shear vector (heading × strength) — the weather engine's
+   *  unified wind, not the old +X-only scalar. */
+  private readonly uWind = uniform(new THREE.Vector2())
+  private readonly uWindMag = uniform(0)
   private readonly uOpacity = uniform(0)
   private inited = false
 
@@ -55,7 +58,8 @@ export class RainSystem {
       const i = instanceIndex.toFloat()
       const fall = float(34).add(hash(i.add(7)).mul(16))
       p.y.subAssign(deltaTime.mul(fall))
-      p.x.addAssign(deltaTime.mul(this.uWind).mul(26))
+      p.x.addAssign(deltaTime.mul(this.uWind.x).mul(26))
+      p.z.addAssign(deltaTime.mul(this.uWind.y).mul(26))
 
       // recycle through the top, rewrapping horizontally
       If(p.y.lessThan(0), () => {
@@ -65,15 +69,18 @@ export class RainSystem {
       })
       If(p.x.greaterThan(HALF), () => p.x.subAssign(HALF * 2))
       If(p.x.lessThan(-HALF), () => p.x.addAssign(HALF * 2))
+      If(p.z.greaterThan(HALF), () => p.z.subAssign(HALF * 2))
+      If(p.z.lessThan(-HALF), () => p.z.addAssign(HALF * 2))
     })().compute(MAX_DROPS) as unknown as THREE.ComputeNode
 
     const material = new THREE.SpriteNodeMaterial()
     material.transparent = true
     material.depthWrite = false
     material.positionNode = this.positions.toAttribute()
-    // thin streak, tilted by wind shear
+    // thin streak, tilted by wind shear magnitude (screen-space sprite
+    // rotation can't track a world heading; the lean sells the speed)
     material.scaleNode = vec2(0.024, 0.5)
-    material.rotationNode = this.uWind.mul(-0.35)
+    material.rotationNode = this.uWindMag.mul(-0.35)
     material.colorNode = vec4(0.72, 0.79, 0.88, 1)
     material.opacityNode = this.uOpacity
     material.fog = false
@@ -86,7 +93,13 @@ export class RainSystem {
     scene.add(this.mesh)
   }
 
-  update(dt: number, focus: THREE.Vector3, rain: number, wind: number): void {
+  update(
+    dt: number,
+    focus: THREE.Vector3,
+    rain: number,
+    windX: number,
+    windZ: number,
+  ): void {
     const active = rain > 0.03
     this.mesh.visible = active
     if (!active) return
@@ -104,7 +117,8 @@ export class RainSystem {
       64,
       Math.floor(MAX_DROPS * Math.min(1, rain)),
     )
-    this.uWind.value = wind
+    this.uWind.value.set(windX, windZ)
+    this.uWindMag.value = Math.hypot(windX, windZ)
     this.uOpacity.value = 0.16 + 0.22 * Math.min(1, rain)
     this.mesh.position.set(focus.x, 0, focus.z)
     try {

@@ -18,6 +18,7 @@ export const TIER_NAMES = [
 export interface WeatherDials {
   chop: number // 0..1
   wind: number
+  gust: number // 0..1 envelope, not a square wave
   rain: number
   lightning: number
   skyDark: number
@@ -26,6 +27,17 @@ export interface WeatherDials {
   boatInstability: number
   activity: number
 }
+
+/** Gust envelope — attack/hold/decay in seconds. The old 9 s boolean
+ *  square wave read as an on/off glitch; wind actually swells and dies. */
+const GUST_ATTACK = 1.5
+const GUST_HOLD = 4
+const GUST_DECAY = 3
+
+/** Prevailing wind heading (radians). Matches the FFT spectrum convention:
+ *  the wind vector in the XZ plane is (cos θ, sin θ). 130° is the heading
+ *  the lake was tuned under. */
+const BASE_WIND_RAD = (130 * Math.PI) / 180
 
 export interface Contribution {
   label: string
@@ -41,14 +53,26 @@ export class WeatherEngine {
 
   private crashBoost = 0
   private rallyDip = 0
-  private gustUntil = 0
+  /** Seconds since gust onset; Infinity = no gust running. */
+  private gustT = Infinity
+  /** Current gust envelope value 0..1 (mirrored into dials.gust). */
+  private gust = 0
+  private windPhase = 0
   private manualStale = false
   manualMode: 'live' | 'manual' = 'live'
   manualIndex = 0
 
+  /** Unified wind vector — one heading for FFT spectrum, rain shear and
+   *  cloth. Veers ±15° as the storm builds (dead-steady air reads fake
+   *  under a thunderstorm). */
+  windHeadingRad = BASE_WIND_RAD
+  /** Wind strength 0..1 for consumers that want a plain scalar. */
+  windSpeed01 = 0
+
   readonly dials: WeatherDials = {
     chop: 0,
     wind: 0,
+    gust: 0,
     rain: 0,
     lightning: 0,
     skyDark: 0,
@@ -68,7 +92,9 @@ export class WeatherEngine {
       this.rallyDip = Math.min(50, this.rallyDip + 35)
     })
     bus.on('gust', () => {
-      this.gustUntil = performance.now() + 9000
+      // fresh gust attacks from zero; a re-trigger mid-gust rewinds to
+      // the start of the hold (never re-pops the attack)
+      this.gustT = this.gustT === Infinity ? 0 : Math.min(this.gustT, GUST_ATTACK)
     })
     bus.on('stale', () => {
       this.manualStale = true
@@ -95,7 +121,17 @@ export class WeatherEngine {
   }
 
   get isGusting(): boolean {
-    return performance.now() < this.gustUntil
+    return this.gust > 0.05
+  }
+
+  /** Wind vector X component (heading × strength), FFT convention. */
+  get windX(): number {
+    return Math.cos(this.windHeadingRad) * this.windSpeed01
+  }
+
+  /** Wind vector Z component (heading × strength), FFT convention. */
+  get windZ(): number {
+    return Math.sin(this.windHeadingRad) * this.windSpeed01
   }
 
   get staleness(): number {
@@ -143,9 +179,25 @@ export class WeatherEngine {
     const k = 1 - Math.exp(-dt * 0.25)
     this.stormIndex += (this.target - this.stormIndex) * k
 
+    // ---- gust envelope: attack → hold → decay ----
+    if (this.gustT !== Infinity) {
+      this.gustT += dt
+      const g = this.gustT
+      if (g < GUST_ATTACK) this.gust = g / GUST_ATTACK
+      else if (g < GUST_ATTACK + GUST_HOLD) this.gust = 1
+      else if (g < GUST_ATTACK + GUST_HOLD + GUST_DECAY)
+        this.gust = 1 - (g - GUST_ATTACK - GUST_HOLD) / GUST_DECAY
+      else {
+        this.gust = 0
+        this.gustT = Infinity
+      }
+    }
+
     // ---- dials ----
     const t = this.stormIndex / 100
-    const gust = this.isGusting ? 0.3 : 0
+    // 0.3 is the old square wave's amplitude — same peak, now enveloped
+    const gust = this.gust * 0.3
+    this.dials.gust = this.gust
     this.dials.chop = clamp(t * 1.1 + gust, 0, 1.3)
     this.dials.wind = clamp(t + gust * 1.2, 0, 1.3)
     this.dials.rain = clamp((this.stormIndex - 55) / 30, 0, 1)
@@ -161,6 +213,16 @@ export class WeatherEngine {
     this.dials.fireWeather = clamp((this.stormIndex - 80) / 20, 0, 1)
     this.dials.boatInstability = clamp(t * 1.15, 0, 1.2)
     this.dials.activity = clamp(t + gust, 0, 1)
+
+    // ---- unified wind vector ----
+    // two incommensurate sines = cheap smooth veer; amplitude rides the
+    // storm so Serene air holds its heading
+    this.windPhase += dt * (0.02 + t * 0.06)
+    const veer =
+      Math.sin(this.windPhase) * 0.7 +
+      Math.sin(this.windPhase * 2.7 + 1.3) * 0.3
+    this.windHeadingRad = BASE_WIND_RAD + veer * (Math.PI / 12) * t
+    this.windSpeed01 = Math.min(1, this.dials.wind)
   }
 }
 
