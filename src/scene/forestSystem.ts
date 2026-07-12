@@ -153,7 +153,7 @@ export class ForestSystem {
 
     // far ring: one InstancedMesh PER PRIMITIVE, sharing the matrix set
     const m4 = new THREE.Matrix4()
-    const q = new THREE.Quaternion()
+    const q4 = new THREE.Quaternion()
     const up = new THREE.Vector3(0, 1, 0)
     const pos = new THREE.Vector3()
     const sc = new THREE.Vector3()
@@ -164,10 +164,10 @@ export class ForestSystem {
         farSlots.length,
       )
       farSlots.forEach((s, i) => {
-        q.setFromAxisAngle(up, s.rot)
+        q4.setFromAxisAngle(up, s.rot)
         sc.setScalar(s.scale)
         pos.set(s.x, terrainHeight(s.x, s.z) - 0.15, s.z)
-        m4.compose(pos, q, sc)
+        m4.compose(pos, q4, sc)
         inst.setMatrixAt(i, m4)
       })
       inst.instanceMatrix.needsUpdate = true
@@ -179,8 +179,16 @@ export class ForestSystem {
     // ---- far-field impostor band: crossed alpha cards climbing the
     // foothills — 4 triangles per tree, so the upslope forest reads as
     // forest instead of green velvet (brief §3.5.3 far ring) ----
+    const q = new URLSearchParams(location.search)
+    // Renaissance bakes: default side sheet = the proven dense atlas
+    // (WebP re-encode, 1.7 MB → 245 KB); ?hdimp previews the slender
+    // Cycles hero-tree sheet instead (sparser — mip erosion candidate,
+    // kept as an A/B until a verdict at 60 fps)
+    const hd = q.has('hdimp')
     const impostorTex = new THREE.TextureLoader().load(
-      `${base}assets/textures/hl-spruce-impostor.png`,
+      `${base}assets/textures/${
+        hd ? 'hl-spruce-side-hd.webp' : 'hl-spruce-impostor.webp'
+      }`,
     )
     impostorTex.colorSpace = THREE.SRGBColorSpace
     const impMat = new THREE.MeshStandardMaterial({
@@ -194,8 +202,12 @@ export class ForestSystem {
       // darker and cooler than near ones (cheap aerial perspective)
       color: 0xb4bfae,
     })
-    const IW = 9
+    // card + UV rect per sheet: the full-frame atlas maps 0..1; the HD
+    // sheet crops to its content bbox (from tools/prep-bakes.mjs) and
+    // narrows the card to the hero tree's true 0.36 aspect
     const IH = 16.5
+    const IW = hd ? 6.0 : 9
+    const [u0, u1, v0, v1] = hd ? [0.328, 0.664, 0.037, 0.961] : [0, 1, 0, 1]
     const impGeo = new THREE.BufferGeometry()
     impGeo.setAttribute(
       'position',
@@ -210,12 +222,49 @@ export class ForestSystem {
     impGeo.setAttribute(
       'uv',
       new THREE.Float32BufferAttribute(
-        [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1],
+        [u0, v0, u1, v0, u1, v1, u0, v1, u0, v0, u1, v0, u1, v1, u0, v1],
         2,
       ),
     )
     impGeo.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7])
     impGeo.computeVertexNormals()
+
+    // canopy card (Renaissance bake): the HD top sheet on a horizontal
+    // quad at the crown's widest point — from the orbit/preset cameras the
+    // far forest used to read as bare X-crosses; the top card closes each
+    // tree from above. ?notop reverts.
+    let topGeo: THREE.PlaneGeometry | null = null
+    let topMat: THREE.MeshStandardMaterial | null = null
+    if (!q.has('notop')) {
+      const topTex = new THREE.TextureLoader().load(
+        `${base}assets/textures/hl-spruce-top.webp`,
+      )
+      topTex.colorSpace = THREE.SRGBColorSpace
+      topMat = new THREE.MeshStandardMaterial({
+        map: topTex,
+        alphaTest: 0.28,
+        side: THREE.DoubleSide,
+        roughness: 1,
+        metalness: 0,
+        // the HD sheet bakes darker than the side atlas — lift it onto the
+        // same aerial-perspective step so oblique views read as one tree
+        color: 0xc8d2c0,
+      })
+      const TOP_D = 7.4
+      const TOP_H = 5.8
+      topGeo = new THREE.PlaneGeometry(TOP_D, TOP_D)
+      topGeo.rotateX(-Math.PI / 2)
+      topGeo.translate(0, TOP_H, 0)
+      // crop UVs to the canopy content bbox (from tools/prep-bakes.mjs)
+      const tuv = topGeo.attributes.uv as THREE.BufferAttribute
+      for (let i = 0; i < tuv.count; i++) {
+        tuv.setXY(
+          i,
+          0.064 + tuv.getX(i) * (0.911 - 0.064),
+          0.082 + tuv.getY(i) * (0.908 - 0.082),
+        )
+      }
+    }
 
     interface ImpSlot { x: number; z: number; scale: number; rot: number }
     const impSlots: ImpSlot[] = []
@@ -245,16 +294,26 @@ export class ForestSystem {
       }
     }
     const impInst = new THREE.InstancedMesh(impGeo, impMat, impSlots.length)
+    const topInst =
+      topGeo && topMat
+        ? new THREE.InstancedMesh(topGeo, topMat, impSlots.length)
+        : null
     impSlots.forEach((s, i) => {
-      q.setFromAxisAngle(up, s.rot)
+      q4.setFromAxisAngle(up, s.rot)
       sc.setScalar(s.scale)
       pos.set(s.x, terrainHeight(s.x, s.z) - 0.3, s.z)
-      m4.compose(pos, q, sc)
+      m4.compose(pos, q4, sc)
       impInst.setMatrixAt(i, m4)
+      topInst?.setMatrixAt(i, m4)
     })
     impInst.instanceMatrix.needsUpdate = true
     impInst.frustumCulled = false
     this.group.add(impInst)
+    if (topInst) {
+      topInst.instanceMatrix.needsUpdate = true
+      topInst.frustumCulled = false
+      this.group.add(topInst)
+    }
 
     this.ready = true
     console.info(

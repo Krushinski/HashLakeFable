@@ -330,7 +330,26 @@ export class TerrainSystem {
 
   private static sandSet: ReturnType<typeof makeSandTextures> | null = null
 
+  /** Blender macro bake (undefined = not resolved yet; null = ?nobake). */
+  private static macroTex: THREE.Texture | null | undefined
+  private static macroMix = 0.5
+
   private buildGround(caustics: CausticsLike | null): void {
+    if (TerrainSystem.macroTex === undefined) {
+      const q = new URLSearchParams(location.search)
+      if (q.has('nobake')) {
+        TerrainSystem.macroTex = null
+      } else {
+        const t = new THREE.TextureLoader().load(
+          `${import.meta.env.BASE_URL}assets/textures/hl-terrain-macro.webp`,
+        )
+        t.colorSpace = THREE.SRGBColorSpace
+        TerrainSystem.macroTex = t
+        const probe = Number(q.get('bakemix'))
+        if (Number.isFinite(probe) && q.get('bakemix') !== null)
+          TerrainSystem.macroMix = Math.min(1, Math.max(0, probe))
+      }
+    }
     const material = this.material
     const vShore = varying(float(0), 'vShoreDist')
     const vHeight = varying(float(0), 'vTerrainHeight')
@@ -461,6 +480,22 @@ export class TerrainSystem {
       // reference frames
       const lakeside = smoothstep(float(30), float(4), vShore)
       grass = mix(grass, color(0x2e6b28), lakeside.mul(0.5))
+
+      // Blender macro bake (Renaissance): the Cycles meadow tone across the
+      // whole domain — grass-biome mottle (melted to organic blotches at
+      // 1024²) plus the baked timberline/foothill gradients. Luminance
+      // drives a brightness mottle; a light hue pull carries the gradients.
+      // ?bakemix= tunes 0..1 live, ?nobake builds without the nodes.
+      if (TerrainSystem.macroTex) {
+        const m = texture(TerrainSystem.macroTex, uv())
+        // meadow mean linear luminance ≈ 0.057 (measured) → mottle ~1
+        const mottle = m.r.add(m.g).add(m.b).mul(5.85).clamp(0.55, 1.4)
+        const k = float(TerrainSystem.macroMix)
+        grass = grass.mul(mix(float(1), mottle, k.mul(0.8)))
+        // ×1.6 lifts the dark bake to the web grass palette's luminance
+        grass = mix(grass, m.rgb.mul(1.6), k.mul(0.16))
+      }
+
       const upland = mix(
         grass,
         forestFloor,

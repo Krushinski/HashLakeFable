@@ -26,6 +26,7 @@ import { Speedometer } from './ui/speedometer'
 import { LofiRadio } from './core/lofiRadio'
 import { Minimap } from './ui/minimap'
 import { FarRanges } from './scene/terrainSystem'
+import { PanoBackdrop } from './scene/panoBackdrop'
 import { LiveBitcoinStore } from './state/liveBitcoinStore'
 import { WeatherEngine } from './state/weatherEngine'
 import { bus } from './state/eventBus'
@@ -151,6 +152,10 @@ async function boot(): Promise<void> {
   const speedo = new Speedometer()
   const lofi = new LofiRadio()
   const farRanges = new FarRanges(scene)
+  // Cycles shore panorama band (Renaissance bake) — ?nopano for the A/B
+  const panoBack = new URLSearchParams(location.search).has('nopano')
+    ? null
+    : new PanoBackdrop(scene)
 
   sky?.bakeEnvironment()
 
@@ -191,6 +196,7 @@ async function boot(): Promise<void> {
   // refraction re-render for zero visible contribution
   if (pro) {
     pro.excludeFromSceneColor(farRanges.mesh)
+    if (panoBack) pro.excludeFromSceneColor(panoBack.mesh)
     forestReady
       .then(() => pro.excludeFromSceneColor(forest.group))
       .catch(() => {})
@@ -750,7 +756,7 @@ async function boot(): Promise<void> {
     /* fall through — compiles lazily as before */
   }
 
-  renderer.setAnimationLoop(async () => {
+  const frameLoop = async (): Promise<void> => {
     if (frameBusy) return
     frameBusy = true
     const rawDt = clock.getDelta()
@@ -779,6 +785,21 @@ async function boot(): Promise<void> {
     wake?.update(dt)
     dressing.update()
     speedo.update(boat.speedMph)
+
+    // pano band mood: read the same tier-driven values Water Pro re-syncs
+    // the real lights from every frame (writes to THREE lights die within
+    // a frame — these sources are the authority). Legacy path stays at the
+    // constructor's daylight mood: it is a permanent-daytime world.
+    if (pro && panoBack) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const L = (pro.water as any).lighting
+      panoBack.setMood(
+        L.sun.color,
+        L.sun.intensity?.value ?? 2.5,
+        L.ambient.skyColor,
+        L.ambient.intensity,
+      )
+    }
 
     if (driveMode) {
       boat.driveCamera(camera, dt)
@@ -964,7 +985,18 @@ async function boot(): Promise<void> {
       )
     }
     frameBusy = false
-  })
+  }
+
+  // ?agentloop — verification probe: agent-driven (hidden/occluded) tabs
+  // suspend rAF ENTIRELY, so setAnimationLoop never fires, the first frame
+  // never presents, and the loader sits forever. Timers still tick in
+  // hidden tabs (clamped ~1 Hz), which is enough for an agent to boot the
+  // world and take screenshots. Never judge fps/motion on this path.
+  if (new URLSearchParams(location.search).has('agentloop')) {
+    window.setInterval(() => void frameLoop(), 125)
+  } else {
+    renderer.setAnimationLoop(frameLoop)
+  }
 }
 
 boot().catch(showFallback)
