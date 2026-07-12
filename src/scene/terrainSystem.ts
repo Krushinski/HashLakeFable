@@ -332,7 +332,7 @@ export class TerrainSystem {
 
   /** Blender macro bake (undefined = not resolved yet; null = ?nobake). */
   private static macroTex: THREE.Texture | null | undefined
-  private static macroMix = 0.5
+  private static macroMix = 0.75
 
   private buildGround(caustics: CausticsLike | null): void {
     if (TerrainSystem.macroTex === undefined) {
@@ -398,20 +398,22 @@ export class TerrainSystem {
       const patch = mx_noise_float(vec3(worldXZ.mul(0.004), 3.1))
       const macro = mx_noise_float(vec3(worldXZ.mul(0.0008), 12.9))
 
-      // palette — WHITE SAND doctrine (§user, demo reference): beautiful
-      // seafloors are not brown or red. Pale cream sand under the water
-      // is what turns the shallows turquoise (the absorption strips red
-      // for free); beaches bleach toward white at the waterline.
+      // palette — WHITE SAND doctrine (§user, demo reference) for the bed;
+      // land recalibrated to the hero_03 bar (Renaissance): reference
+      // grass measures hue 36-40 R/G 1.15-1.23 (olive-khaki) where the
+      // old palette presented hue 60-66 pure green; the beach strip is
+      // near-neutral (sat 0.02-0.03), not salmon. Bed colors untouched —
+      // the underwater cream drives the turquoise and already matches.
       const bedDeep = color(0x2c3d36)
       const bedSand = color(0xd8d0b6)
-      const dampSand = color(0xb3a98d)
-      const drySand = color(0xe9e1c8)
-      const grassLush = color(0x4e7038)
-      const grassDeep = color(0x35522c)
-      const meadowDry = color(0x6d7f42)
-      const forestFloor = color(0x2c4526)
-      const rockLight = color(0x8d8578)
-      const rockDark = color(0x4f4a42)
+      const dampSand = color(0xa9a494)
+      const drySand = color(0xe8e6dc)
+      const grassLush = color(0x6e7040)
+      const grassDeep = color(0x4a5230)
+      const meadowDry = color(0x87804c)
+      const forestFloor = color(0x3f4829)
+      const rockLight = color(0x81806f)
+      const rockDark = color(0x45463e)
       const snow = color(0xeef2f4)
 
       // depth below the waterline in meters (positive underwater) — the
@@ -470,16 +472,17 @@ export class TerrainSystem {
         smoothstep(float(0.1), float(0.45), vHeight),
       ).mul(sandGrain)
 
-      // meadow: lush near shore, drier + patchier with altitude
+      // meadow: khaki-leaning and patchy — the dry blend runs hotter than
+      // the old serene-green mix (hero_03: olive ground, dark trees on top)
       let grass = mix(
         mix(grassLush, grassDeep, patch.mul(0.5).add(0.5)),
         meadowDry,
-        macro.mul(0.5).add(0.5).mul(0.55),
+        macro.mul(0.5).add(0.5).mul(0.7),
       )
-      // lakeside lush band — the rich waterline green from the serene
-      // reference frames
+      // lakeside band — kept as a subtle richness accent, no longer the
+      // neon-green waterline rim (reference shows khaki meeting the sand)
       const lakeside = smoothstep(float(30), float(4), vShore)
-      grass = mix(grass, color(0x2e6b28), lakeside.mul(0.5))
+      grass = mix(grass, color(0x5f7038), lakeside.mul(0.25))
 
       // Blender macro bake (Renaissance): the Cycles meadow tone across the
       // whole domain — grass-biome mottle (melted to organic blotches at
@@ -492,8 +495,9 @@ export class TerrainSystem {
         const mottle = m.r.add(m.g).add(m.b).mul(5.85).clamp(0.55, 1.4)
         const k = float(TerrainSystem.macroMix)
         grass = grass.mul(mix(float(1), mottle, k.mul(0.8)))
-        // ×1.6 lifts the dark bake to the web grass palette's luminance
-        grass = mix(grass, m.rgb.mul(1.6), k.mul(0.16))
+        // ×1.6 lifts the dark bake to the web grass palette's luminance;
+        // 24% hue pull at the 0.75 default — the bake IS the reference tone
+        grass = mix(grass, m.rgb.mul(1.6), k.mul(0.32))
       }
 
       const upland = mix(
@@ -511,13 +515,15 @@ export class TerrainSystem {
         vec3(worldXZ.x.mul(0.11), vHeight.mul(0.16), worldXZ.y.mul(0.11)),
       )
       const rockBase = mix(rockDark, rockLight, stria.mul(0.5).add(0.5))
+      // fracture tones de-pinked with the base palette: warm sun + ACES
+      // was shifting the whole wall salmon (reference: khaki-grey tweed)
       const rock = mix(
         rockBase,
-        mix(color(0x6b6257), color(0x9a938a), fracture.mul(0.5).add(0.5)),
+        mix(color(0x63604f), color(0x8f8d7c), fracture.mul(0.5).add(0.5)),
         0.35,
       )
       // scree fans collect on the mid slopes below the crags
-      const scree = color(0x7a7268)
+      const scree = color(0x74735f)
       const screeMask = smoothstep(float(0.24), float(0.36), vSlope)
         .mul(float(1).sub(smoothstep(float(0.42), float(0.6), vSlope)))
         .mul(smoothstep(float(160), float(280), vHeight))
@@ -547,13 +553,18 @@ export class TerrainSystem {
       // rendering ~550-690 — the old 455-590 ramp barely frosted the
       // tips. Full caps + longer drift fingers; the slope cutoff still
       // strips cliff faces bare.
+      // SNOW FIX (hero_03 bar): the 0.75 rescale steepened every carved
+      // flank ~1.33× past the old 0.42-0.68 slope cutoff — the massif
+      // rendered ZERO white while every reference summit is capped. Relax
+      // the cutoff (crest faces keep snow, true cliffs still shed it) and
+      // drop the ramp so the 550-690 m crests carry full caps.
       const snowJitter = mx_noise_float(vec3(worldXZ.mul(0.006), 21.7))
         .mul(85)
       const snowMask = smoothstep(
-        float(380),
-        float(520),
+        float(330),
+        float(460),
         vHeight.add(snowJitter),
-      ).mul(float(1).sub(smoothstep(float(0.42), float(0.68), vSlope)))
+      ).mul(float(1).sub(smoothstep(float(0.55), float(0.85), vSlope)))
 
       const beachToGrass = mix(
         beach,
@@ -571,7 +582,7 @@ export class TerrainSystem {
       // wet-sand waterline band — recently-licked sand just above the
       // water, darker and saturated, pocketed by grain so it never reads
       // as a painted contour ring (pairs with the roughness drop above)
-      const wetSand = color(0xa89d80)
+      const wetSand = color(0x968f7c)
       const wetMask = smoothstep(float(0.0), float(0.14), vHeight)
         .mul(float(1).sub(smoothstep(float(0.22), float(0.6), vHeight)))
         .mul(grain.mul(0.18).add(0.82))

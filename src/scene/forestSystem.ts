@@ -99,7 +99,9 @@ export class ForestSystem {
       if (s < minShore || s > maxShore) return false
       for (const p of slots) {
         const d2 = (p.x - x) ** 2 + (p.z - z) ** 2
-        if (d2 < (hero ? 36 : 20)) return false
+        // 3.46 m ring spacing — crowns overlap at the waterline like
+        // grasspass_cam125, not a picket fence
+        if (d2 < (hero ? 36 : 12)) return false
       }
       slots.push({
         x,
@@ -123,16 +125,20 @@ export class ForestSystem {
     // even speckle ("ants on a hill", §user last-day): each seed drops a
     // stand of 2-6 trees within ~4-16 m, so the shoreline reads as
     // coherent dark masses with gaps instead of uniform dots
-    for (let i = 0; i < 3000 && slots.length < 840; i++) {
+    // the full-poly trees live ONLY in the first 150 m of shore — that's
+    // the band where 11k tris/tree actually resolve; the impostor wall
+    // owns everything beyond. Half the band at the same-ish count ≈
+    // double the waterline density, minus ~1.3M tris/pass (hero_03 bar).
+    for (let i = 0; i < 9000 && slots.length < 720; i++) {
       const ang = rand() * Math.PI * 2
       const rad = (500 + rand() * 700) * S
       const cx = Math.sin(ang) * rad
       const cz = Math.cos(ang) * rad * 0.92 + 40
       const n = 2 + Math.floor(rand() * 5)
-      for (let j = 0; j < n && slots.length < 840; j++) {
+      for (let j = 0; j < n && slots.length < 720; j++) {
         const a = rand() * Math.PI * 2
         const r = 3.5 + rand() * 13
-        tryPlace(cx + Math.sin(a) * r, cz + Math.cos(a) * r, 10, 320)
+        tryPlace(cx + Math.sin(a) * r, cz + Math.cos(a) * r, 10, 150)
       }
     }
 
@@ -179,55 +185,69 @@ export class ForestSystem {
     // ---- far-field impostor band: crossed alpha cards climbing the
     // foothills — 4 triangles per tree, so the upslope forest reads as
     // forest instead of green velvet (brief §3.5.3 far ring) ----
+    // RENAISSANCE REWRITE (hero_03 is the bar): the reference render's
+    // shores carry a CONTINUOUS forest — thousands of slender spires
+    // massed at the waterline, thinning upslope, in mixed green/olive/
+    // dead-brown tones. Two card populations (slender Cycles hero sheet +
+    // the proven full-crown atlas), shore-biased placement on a spatial
+    // hash (the old O(n²) scan can't seed 38k), per-instance tint.
     const q = new URLSearchParams(location.search)
-    // Renaissance bakes: default side sheet = the proven dense atlas
-    // (WebP re-encode, 1.7 MB → 245 KB); ?hdimp previews the slender
-    // Cycles hero-tree sheet instead (sparser — mip erosion candidate,
-    // kept as an A/B until a verdict at 60 fps)
-    const hd = q.has('hdimp')
-    const impostorTex = new THREE.TextureLoader().load(
-      `${base}assets/textures/${
-        hd ? 'hl-spruce-side-hd.webp' : 'hl-spruce-impostor.webp'
-      }`,
-    )
-    impostorTex.colorSpace = THREE.SRGBColorSpace
-    const impMat = new THREE.MeshStandardMaterial({
-      map: impostorTex,
-      alphaTest: 0.28,
-      side: THREE.DoubleSide,
-      roughness: 1,
-      metalness: 0,
-      // knock the far cards down a step — full-brightness sprites against
-      // the meadow read as high-contrast confetti; distant conifers sit
-      // darker and cooler than near ones (cheap aerial perspective)
-      color: 0xb4bfae,
-    })
-    // card + UV rect per sheet: the full-frame atlas maps 0..1; the HD
-    // sheet crops to its content bbox (from tools/prep-bakes.mjs) and
-    // narrows the card to the hero tree's true 0.36 aspect
+    // ?hdimp = all-slender, ?oldimp = all-crown, default mixes like the
+    // render; ?forest=N scales density (0.25 ≈ the pre-Renaissance look)
+    const mixSlender = q.has('hdimp') ? 1 : q.has('oldimp') ? 0 : 0.55
+    const densityProbe = Number(q.get('forest'))
+    const density =
+      Number.isFinite(densityProbe) && densityProbe > 0
+        ? Math.min(3, densityProbe)
+        : 1
+
+    const SHEETS = [
+      // slender Cycles hero tree (content-bbox UV crop from prep-bakes)
+      { url: 'hl-spruce-side-hd.webp', u0: 0.328, u1: 0.664, v0: 0.037, v1: 0.961, w: 6.0 },
+      // full-crown atlas — holds mass at distance where thin spires mip away
+      { url: 'hl-spruce-impostor.webp', u0: 0, u1: 1, v0: 0, v1: 1, w: 9 },
+    ] as const
     const IH = 16.5
-    const IW = hd ? 6.0 : 9
-    const [u0, u1, v0, v1] = hd ? [0.328, 0.664, 0.037, 0.961] : [0, 1, 0, 1]
-    const impGeo = new THREE.BufferGeometry()
-    impGeo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute(
-        [
-          -IW / 2, 0, 0, IW / 2, 0, 0, IW / 2, IH, 0, -IW / 2, IH, 0,
-          0, 0, -IW / 2, 0, 0, IW / 2, 0, IH, IW / 2, 0, IH, -IW / 2,
-        ],
-        3,
-      ),
-    )
-    impGeo.setAttribute(
-      'uv',
-      new THREE.Float32BufferAttribute(
-        [u0, v0, u1, v0, u1, v1, u0, v1, u0, v0, u1, v0, u1, v1, u0, v1],
-        2,
-      ),
-    )
-    impGeo.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7])
-    impGeo.computeVertexNormals()
+    const impMats = SHEETS.map((s) => {
+      const tex = new THREE.TextureLoader().load(`${base}assets/textures/${s.url}`)
+      tex.colorSpace = THREE.SRGBColorSpace
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        alphaTest: 0.28,
+        side: THREE.DoubleSide,
+        roughness: 1,
+        metalness: 0,
+        // knock the far cards down a step — full-brightness sprites against
+        // the meadow read as high-contrast confetti; distant conifers sit
+        // darker and cooler than near ones (cheap aerial perspective)
+        color: 0xb4bfae,
+      })
+    })
+    const impGeos = SHEETS.map((s) => {
+      const IW = s.w
+      const g = new THREE.BufferGeometry()
+      g.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(
+          [
+            -IW / 2, 0, 0, IW / 2, 0, 0, IW / 2, IH, 0, -IW / 2, IH, 0,
+            0, 0, -IW / 2, 0, 0, IW / 2, 0, IH, IW / 2, 0, IH, -IW / 2,
+          ],
+          3,
+        ),
+      )
+      g.setAttribute(
+        'uv',
+        new THREE.Float32BufferAttribute(
+          [s.u0, s.v0, s.u1, s.v0, s.u1, s.v1, s.u0, s.v1,
+           s.u0, s.v0, s.u1, s.v0, s.u1, s.v1, s.u0, s.v1],
+          2,
+        ),
+      )
+      g.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7])
+      g.computeVertexNormals()
+      return g
+    })
 
     // canopy card (Renaissance bake): the HD top sheet on a horizontal
     // quad at the crown's widest point — from the orbit/preset cameras the
@@ -266,59 +286,134 @@ export class ForestSystem {
       }
     }
 
-    interface ImpSlot { x: number; z: number; scale: number; rot: number }
+    interface ImpSlot {
+      x: number
+      z: number
+      scale: number
+      rot: number
+      variant: number
+      tone: readonly [number, number, number]
+    }
     const impSlots: ImpSlot[] = []
-    // clumped like the near ring: stands of 3-8 cards, tighter packing —
-    // distant forest reads as a closed dark canopy, not confetti
-    for (let i = 0; i < 20000 && impSlots.length < 10000; i++) {
+    const TARGET = Math.round(38000 * density)
+
+    // spatial hash for min-spacing — cell ≥ the largest spacing radius so
+    // a 3×3 neighborhood always covers it
+    const CELL = 6
+    const grid = new Map<string, ImpSlot[]>()
+    const fits = (x: number, z: number, minD: number) => {
+      const cx = Math.floor(x / CELL)
+      const cz = Math.floor(z / CELL)
+      const d2 = minD * minD
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        for (let gz = cz - 1; gz <= cz + 1; gz++) {
+          const cell = grid.get(`${gx},${gz}`)
+          if (!cell) continue
+          for (const p of cell) {
+            if ((p.x - x) ** 2 + (p.z - z) ** 2 < d2) return false
+          }
+        }
+      }
+      return true
+    }
+    const put = (slot: ImpSlot) => {
+      const key = `${Math.floor(slot.x / CELL)},${Math.floor(slot.z / CELL)}`
+      const cell = grid.get(key)
+      if (cell) cell.push(slot)
+      else grid.set(key, [slot])
+      impSlots.push(slot)
+    }
+
+    // mixed stand tones straight off hero_03: living green, dry olive,
+    // standing-dead brown, deep conifer shadow (multiplies the material's
+    // aerial-perspective base)
+    const TONES = [
+      [0.93, 1.0, 0.93],
+      [1.08, 1.0, 0.74],
+      [1.16, 0.9, 0.66],
+      [0.74, 0.82, 0.78],
+    ] as const
+    const pickTone = () => {
+      const t = rand()
+      return t < 0.46 ? TONES[0] : t < 0.68 ? TONES[1] : t < 0.8 ? TONES[2] : TONES[3]
+    }
+
+    // shore-massed stands: the render's forest is DENSEST at the waterline
+    // and thins with distance inland — acceptance probability and spacing
+    // both follow the shore band
+    for (let i = 0; i < TARGET * 2 && impSlots.length < TARGET; i++) {
       const ang = rand() * Math.PI * 2
-      const rad = (640 + rand() * 1500) * S
+      const rad = (520 + rand() * 1620) * S
       const cx = Math.sin(ang) * rad
       const cz = Math.cos(ang) * rad * 0.92 + 40 * S
-      const n = 3 + Math.floor(rand() * 6)
-      for (let j = 0; j < n && impSlots.length < 10000; j++) {
+      const n = 4 + Math.floor(rand() * 6)
+      for (let j = 0; j < n && impSlots.length < TARGET; j++) {
         const a = rand() * Math.PI * 2
-        const r = 2.5 + rand() * 8.5
+        const r = 3 + rand() * 9
         const x = cx + Math.sin(a) * r
         const z = cz + Math.cos(a) * r
         const s = shoreSdf(x, z)
-        if (s < 50 || s > 1200 * S) continue
+        if (s < 26 || s > 1200 * S) continue
+        const band = s < 250 ? 0 : s < 600 ? 1 : 2
+        if (band === 1 && rand() > 0.5) continue
+        if (band === 2 && rand() > 0.2) continue
         const h = terrainHeight(x, z)
         if (h > 140) continue // hug the lake bowl — high trees read as ants
-        let ok = true
-        for (const p of impSlots) {
-          if ((p.x - x) ** 2 + (p.z - z) ** 2 < 16) { ok = false; break }
-        }
-        if (!ok) continue
-        impSlots.push({ x, z, scale: 0.7 + rand() * 0.65, rot: rand() * Math.PI })
+        const minD = band === 0 ? 3.0 : band === 1 ? 4.2 : 5.5
+        if (!fits(x, z, minD)) continue
+        put({
+          x,
+          z,
+          scale: (band === 0 ? 0.85 : 0.7) + rand() * 0.6,
+          rot: rand() * Math.PI,
+          variant: rand() < mixSlender ? 0 : 1,
+          tone: pickTone(),
+        })
       }
     }
-    const impInst = new THREE.InstancedMesh(impGeo, impMat, impSlots.length)
-    const topInst =
-      topGeo && topMat
-        ? new THREE.InstancedMesh(topGeo, topMat, impSlots.length)
-        : null
-    impSlots.forEach((s, i) => {
+
+    // two side-card populations + one shared canopy layer
+    const col = new THREE.Color()
+    const setSlotMatrix = (s: ImpSlot) => {
       q4.setFromAxisAngle(up, s.rot)
       sc.setScalar(s.scale)
       pos.set(s.x, terrainHeight(s.x, s.z) - 0.3, s.z)
       m4.compose(pos, q4, sc)
-      impInst.setMatrixAt(i, m4)
-      topInst?.setMatrixAt(i, m4)
+    }
+    const byVariant: ImpSlot[][] = [[], []]
+    for (const s of impSlots) byVariant[s.variant].push(s)
+    let sideCards = 0
+    byVariant.forEach((slots, v) => {
+      if (slots.length === 0) return
+      const inst = new THREE.InstancedMesh(impGeos[v], impMats[v], slots.length)
+      slots.forEach((s, i) => {
+        setSlotMatrix(s)
+        inst.setMatrixAt(i, m4)
+        inst.setColorAt(i, col.setRGB(s.tone[0], s.tone[1], s.tone[2]))
+      })
+      inst.instanceMatrix.needsUpdate = true
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true
+      inst.frustumCulled = false
+      this.group.add(inst)
+      sideCards += slots.length
     })
-    impInst.instanceMatrix.needsUpdate = true
-    impInst.frustumCulled = false
-    this.group.add(impInst)
-    if (topInst) {
+    if (topGeo && topMat) {
+      const topInst = new THREE.InstancedMesh(topGeo, topMat, impSlots.length)
+      impSlots.forEach((s, i) => {
+        setSlotMatrix(s)
+        topInst.setMatrixAt(i, m4)
+        topInst.setColorAt(i, col.setRGB(s.tone[0], s.tone[1], s.tone[2]))
+      })
       topInst.instanceMatrix.needsUpdate = true
+      if (topInst.instanceColor) topInst.instanceColor.needsUpdate = true
       topInst.frustumCulled = false
       this.group.add(topInst)
     }
-
     this.ready = true
     console.info(
       `forest: ${heroSlots.length} hero + ${farSlots.length} instanced + ` +
-        `${impSlots.length} impostor spruces, ` +
+        `${sideCards} impostor spruces (${byVariant[0].length} slender / ` +
+        `${byVariant[1].length} crown, density ×${density}), ` +
         `${lod0.prims.length}+${lod1.prims.length} prims`,
     )
   }
