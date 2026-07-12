@@ -32,9 +32,14 @@ const RADIUS = 3733 * LAKE_SCALE
 export class PanoBackdrop {
   readonly mesh: THREE.Mesh
   private readonly mood = uniform(new THREE.Color(1, 1, 1))
+  /** ?panoboost=N — live brightness dial for taste passes (default 1). */
+  private readonly boost: number
 
   constructor(scene: THREE.Scene) {
     const q = new URLSearchParams(location.search)
+    const boostProbe = Number(q.get('panoboost'))
+    this.boost = Number.isFinite(boostProbe) && boostProbe > 0 ? boostProbe : 1
+    ;(this.mood.value as THREE.Color).setScalar(this.boost)
     const base = import.meta.env.BASE_URL
     const tex = new THREE.TextureLoader().load(
       `${base}assets/textures/hl-pano-shores.webp`,
@@ -68,6 +73,12 @@ export class PanoBackdrop {
     mat.colorNode = vec4(t.rgb.mul(this.mood), t.a)
     mat.alphaTest = 0.35
     mat.side = THREE.BackSide
+    // NO scene fog: Cycles already baked true aerial perspective into the
+    // pano at real distances — the web fog was a SECOND full dose (~52%
+    // wash at the band's 3.3 km from the opening camera in Serene, which
+    // erased the daylight band entirely). Storm/night stay correct via
+    // the mood uniform; the fog-on-sky lesson applies to backdrops too.
+    mat.fog = false
 
     this.mesh = new THREE.Mesh(geo, mat)
     this.mesh.position.y = EYE_Y
@@ -91,12 +102,13 @@ export class PanoBackdrop {
     ambientIntensity: number,
   ): void {
     const m = this.mood.value as THREE.Color
-    const s = (sunIntensity / 2.5) * 0.55
-    const a = (ambientIntensity / 1.3) * 0.5
+    const s = (sunIntensity / 2.5) * 0.55 * this.boost
+    const a = (ambientIntensity / 1.3) * 0.5 * this.boost
+    const cap = 1.15 * this.boost
     m.setRGB(
-      Math.min(1.15, sunColor.r * s + skyColor.r * a),
-      Math.min(1.15, sunColor.g * s + skyColor.g * a),
-      Math.min(1.15, sunColor.b * s + skyColor.b * a),
+      Math.min(cap, sunColor.r * s + skyColor.r * a),
+      Math.min(cap, sunColor.g * s + skyColor.g * a),
+      Math.min(cap, sunColor.b * s + skyColor.b * a),
     )
   }
 }
