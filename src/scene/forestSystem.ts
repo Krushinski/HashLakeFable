@@ -125,20 +125,21 @@ export class ForestSystem {
     // even speckle ("ants on a hill", §user last-day): each seed drops a
     // stand of 2-6 trees within ~4-16 m, so the shoreline reads as
     // coherent dark masses with gaps instead of uniform dots
-    // the full-poly trees live ONLY in the first 150 m of shore — that's
-    // the band where 11k tris/tree actually resolve; the impostor wall
-    // owns everything beyond. Half the band at the same-ish count ≈
-    // double the waterline density, minus ~1.3M tris/pass (hero_03 bar).
-    for (let i = 0; i < 9000 && slots.length < 720; i++) {
+    // REAL trees to 400 m (correction pass): with the fake-LOD bark
+    // dropped (see the far-ring build below) a distant tree costs ~400
+    // tris, so the ring affords 4,000 of them — the picket-fence era's
+    // entire budget bought 720. Cards begin where geometry stops
+    // resolving instead of 150 m from the sand.
+    for (let i = 0; i < 30000 && slots.length < 4000; i++) {
       const ang = rand() * Math.PI * 2
       const rad = (500 + rand() * 700) * S
       const cx = Math.sin(ang) * rad
       const cz = Math.cos(ang) * rad * 0.92 + 40
       const n = 2 + Math.floor(rand() * 5)
-      for (let j = 0; j < n && slots.length < 720; j++) {
+      for (let j = 0; j < n && slots.length < 4000; j++) {
         const a = rand() * Math.PI * 2
         const r = 3.5 + rand() * 13
-        tryPlace(cx + Math.sin(a) * r, cz + Math.cos(a) * r, 10, 150)
+        tryPlace(cx + Math.sin(a) * r, cz + Math.cos(a) * r, 10, 400)
       }
     }
 
@@ -157,30 +158,72 @@ export class ForestSystem {
       this.group.add(holder)
     }
 
-    // far ring: one InstancedMesh PER PRIMITIVE, sharing the matrix set
+    // far ring TRUE-LOD (correction pass): hl-spruce-lod1's bark prim is
+    // a FAKE LOD — the full 10,652-tri hero trunk — which is what capped
+    // the old ring at 720 trees. A distant spruce is 90% canopy: instance
+    // ONLY the 386-tri foliage prim over a 10-tri cone trunk. (A proper
+    // Blender rebake of the bark stays on the backlog; at 150 m+ this is
+    // visually identical and 27× cheaper.)
     const m4 = new THREE.Matrix4()
     const q4 = new THREE.Quaternion()
     const up = new THREE.Vector3(0, 1, 0)
     const pos = new THREE.Vector3()
     const sc = new THREE.Vector3()
-    for (const p of lod1.prims) {
-      const inst = new THREE.InstancedMesh(
-        p.geometry,
-        p.material,
-        farSlots.length,
-      )
-      farSlots.forEach((s, i) => {
-        q4.setFromAxisAngle(up, s.rot)
-        sc.setScalar(s.scale)
-        pos.set(s.x, terrainHeight(s.x, s.z) - 0.15, s.z)
-        m4.compose(pos, q4, sc)
-        inst.setMatrixAt(i, m4)
-      })
-      inst.instanceMatrix.needsUpdate = true
-      // matrices span the whole lake — default geometry bounds would cull it
-      inst.frustumCulled = false
-      this.group.add(inst)
+    const foliage = lod1.prims.reduce((a, b) =>
+      (a.geometry.index?.count ?? Infinity) <=
+      (b.geometry.index?.count ?? Infinity)
+        ? a
+        : b,
+    )
+    foliage.geometry.computeBoundingBox()
+    const treeTop = foliage.geometry.boundingBox!.max.y
+    const trunkH = treeTop * 0.62
+    const trunkGeo = new THREE.CylinderGeometry(0.06, 0.24, trunkH, 5)
+    trunkGeo.translate(0, trunkH / 2, 0)
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: 0x4a3a2a,
+      roughness: 1,
+    })
+    // foliage-only trees read as bare antenna tiers up close (the "bark"
+    // prim carries the whole branch silhouette) — so the ring splits: the
+    // ~700 nearest-to-shore trees keep FULL geometry (the entire old
+    // ring's budget, front and center), everything beyond gets the lite
+    // build where distance hides the sparsity
+    const byShore = farSlots
+      .map((s) => ({ s, sd: shoreSdf(s.x, s.z) }))
+      .sort((a, b) => a.sd - b.sd)
+      .map((e) => e.s)
+    const FULL_N = Math.min(700, byShore.length)
+    const fullSlots = byShore.slice(0, FULL_N)
+    const liteSlots = byShore.slice(FULL_N)
+    const buildRing = (
+      ringSlots: typeof farSlots,
+      prims: { geometry: THREE.BufferGeometry; material: THREE.Material }[],
+    ) => {
+      for (const p of prims) {
+        const inst = new THREE.InstancedMesh(
+          p.geometry,
+          p.material,
+          ringSlots.length,
+        )
+        ringSlots.forEach((s, i) => {
+          q4.setFromAxisAngle(up, s.rot)
+          sc.setScalar(s.scale)
+          pos.set(s.x, terrainHeight(s.x, s.z) - 0.15, s.z)
+          m4.compose(pos, q4, sc)
+          inst.setMatrixAt(i, m4)
+        })
+        inst.instanceMatrix.needsUpdate = true
+        // matrices span the whole lake — default bounds would cull it
+        inst.frustumCulled = false
+        this.group.add(inst)
+      }
     }
+    buildRing(fullSlots, lod1.prims)
+    buildRing(liteSlots, [
+      { geometry: foliage.geometry, material: foliage.material },
+      { geometry: trunkGeo, material: trunkMat },
+    ])
 
     // ---- far-field impostor band: crossed alpha cards climbing the
     // foothills — 4 triangles per tree, so the upslope forest reads as
@@ -270,8 +313,13 @@ export class ForestSystem {
         // same aerial-perspective step so oblique views read as one tree
         color: 0xc8d2c0,
       })
-      const TOP_D = 7.4
-      const TOP_H = 5.8
+      // CORRECTION (user, live): at 5.8 m the horizontal card bisected
+      // every tree mid-crown — a hard line across the side cards from any
+      // raised view. It now caps the thin apex zone (~75% height, where
+      // the side sheets are mostly transparent) and shrinks to match the
+      // upper cone; from above it still closes the silhouette.
+      const TOP_D = 5.6
+      const TOP_H = 12.4
       topGeo = new THREE.PlaneGeometry(TOP_D, TOP_D)
       topGeo.rotateX(-Math.PI / 2)
       topGeo.translate(0, TOP_H, 0)
@@ -355,6 +403,9 @@ export class ForestSystem {
         const s = shoreSdf(x, z)
         if (s < 26 || s > 1200 * S) continue
         const band = s < 250 ? 0 : s < 600 ? 1 : 2
+        // real geometry fills the shore to 400 m; cards still carry the
+        // canopy MASS between the lite trees (0.55 read too airy)
+        if (band === 0 && rand() > 0.8) continue
         if (band === 1 && rand() > 0.5) continue
         if (band === 2 && rand() > 0.2) continue
         const h = terrainHeight(x, z)

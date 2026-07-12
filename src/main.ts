@@ -27,6 +27,7 @@ import { LofiRadio } from './core/lofiRadio'
 import { Minimap } from './ui/minimap'
 import { FarRanges } from './scene/terrainSystem'
 import { PanoBackdrop } from './scene/panoBackdrop'
+import { GrassSystem } from './scene/grassSystem'
 import { LiveBitcoinStore } from './state/liveBitcoinStore'
 import { WeatherEngine } from './state/weatherEngine'
 import { bus } from './state/eventBus'
@@ -156,6 +157,8 @@ async function boot(): Promise<void> {
   const panoBack = new URLSearchParams(location.search).has('nopano')
     ? null
     : new PanoBackdrop(scene)
+  // near-camera grass biome (grass pass) — ?nograss / ?grass=N
+  const grass = new GrassSystem(scene)
 
   sky?.bakeEnvironment()
 
@@ -197,6 +200,7 @@ async function boot(): Promise<void> {
   if (pro) {
     pro.excludeFromSceneColor(farRanges.mesh)
     if (panoBack) pro.excludeFromSceneColor(panoBack.mesh)
+    if (grass.mesh) pro.excludeFromSceneColor(grass.mesh)
     forestReady
       .then(() => pro.excludeFromSceneColor(forest.group))
       .catch(() => {})
@@ -777,6 +781,8 @@ async function boot(): Promise<void> {
     // storm theater
     if (driveMode) tmpFocus.set(boat.x, 0, boat.z)
     else tmpFocus.copy(camRig.pos)
+    // grass follows the same focus (budgeted re-seed inside)
+    grass.update(tmpFocus.x, tmpFocus.z)
     rain.update(dt, tmpFocus, weather.dials.rain, weather.windX, weather.windZ)
     lightning.update(dt, weather.dials.lightning, boat.x, boat.z)
     fireSky.update(dt, weather.dials.fireWeather, tmpFocus)
