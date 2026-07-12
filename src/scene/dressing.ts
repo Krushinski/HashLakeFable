@@ -240,27 +240,43 @@ export class LakeDressing {
     const rand = seededRandom(777333)
 
     const base = import.meta.env.BASE_URL
-    const woodTex = new THREE.TextureLoader().load(
-      `${base}assets/textures/hl-wood.png`,
-    )
-    woodTex.colorSpace = THREE.SRGBColorSpace
-    woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping
+    // weathered_brown_planks (PolyHaven, CC0) — the Blender dressing
+    // verdict (verify_dock_shore_final2): real weathered boards with
+    // normal-mapped grain replace the procedural hl-wood sheet
+    const loadWood = (name: string, srgb: boolean) => {
+      const t = new THREE.TextureLoader().load(`${base}assets/textures/${name}`)
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace
+      t.wrapS = t.wrapT = THREE.RepeatWrapping
+      return t
+    }
+    const plankTex = loadWood('hl-dock-planks.webp', true)
+    const plankNor = loadWood('hl-dock-planks-nor.webp', false)
     const wood = new THREE.MeshStandardMaterial({
-      map: woodTex,
-      color: 0xa08a70, // weathers the grain toward silver-gray
-      roughness: 0.88,
+      map: plankTex,
+      normalMap: plankNor,
+      color: 0xd8d2c8, // light silvering over the warm boards
+      roughness: 0.82,
     })
     const woodDark = new THREE.MeshStandardMaterial({
-      map: woodTex,
-      color: 0x5c4a38,
-      roughness: 0.92,
+      map: plankTex,
+      normalMap: plankNor,
+      color: 0x77685a,
+      roughness: 0.9,
     })
     const dock = new THREE.Group()
 
-    // planks laid ACROSS the walkway, tiny jitter so it reads hand-built
-    const plankGeo = new THREE.BoxGeometry(0.62, 0.07, 2.4)
+    // planks laid ACROSS the walkway, tiny jitter so it reads hand-built;
+    // each board samples its own slice of the sheet so no two planks twin
+    const plankProto = new THREE.BoxGeometry(0.62, 0.07, 2.4)
     for (let d = 0; d < LEN; d += 0.7) {
-      const plank = new THREE.Mesh(plankGeo, wood)
+      const g = plankProto.clone()
+      const uvA = g.attributes.uv as THREE.BufferAttribute
+      const u0 = rand() * 0.8
+      const v0 = rand() * 0.25
+      for (let k = 0; k < uvA.count; k++) {
+        uvA.setXY(k, u0 + uvA.getX(k) * 0.2, v0 + uvA.getY(k) * 0.75)
+      }
+      const plank = new THREE.Mesh(g, wood)
       plank.position.set(
         startX + 2 + d,
         deckY + (rand() - 0.5) * 0.016,

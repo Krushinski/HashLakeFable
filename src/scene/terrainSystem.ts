@@ -377,19 +377,23 @@ export class TerrainSystem {
       return positionLocal
     })()
 
-    // wet-sand waterline: the band the water actually licks — darker,
-    // saturated, and GLOSSY (roughness drop is what sells "wet")
+    // wet-sand waterline: the band the water actually licks — darker and
+    // GLOSSY (the roughness drop is what sells "wet"). Band geometry is
+    // the Blender dressing verdict (verify_wet_test5): keyed on the
+    // SIGNED shore SDF, −7..+3 m with full wet −5.5..+1 — the narrow
+    // elevation-keyed band it replaces was near-invisible; wet roughness
+    // 0.28 (was 0.38).
     material.roughnessNode = Fn(() => {
       const depthM = vHeight.negate()
-      const wet = smoothstep(float(-0.12), float(0.08), vHeight).mul(
-        float(1).sub(smoothstep(float(0.25), float(0.7), vHeight)),
+      const wet = smoothstep(float(-7), float(-5.5), vShore).mul(
+        float(1).sub(smoothstep(float(1), float(3), vShore)),
       )
       const base = mix(
         float(0.95),
         float(0.8),
         smoothstep(float(0.1), float(1.5), depthM),
       )
-      return mix(base, float(0.38), wet)
+      return mix(base, float(0.28), wet)
     })()
 
     material.colorNode = Fn(() => {
@@ -579,14 +583,18 @@ export class TerrainSystem {
       let ground = mix(bed, beachToGrass,
         smoothstep(float(-0.05), float(0.3), vHeight))
 
-      // wet-sand waterline band — recently-licked sand just above the
-      // water, darker and saturated, pocketed by grain so it never reads
-      // as a painted contour ring (pairs with the roughness drop above)
-      const wetSand = color(0x968f7c)
-      const wetMask = smoothstep(float(0.0), float(0.14), vHeight)
-        .mul(float(1).sub(smoothstep(float(0.22), float(0.6), vHeight)))
-        .mul(grain.mul(0.18).add(0.82))
-      ground = mix(ground, wetSand, wetMask.mul(0.85))
+      // wet-sand waterline band — Blender dressing verdict
+      // (verify_wet_test5): signed-SDF band −7..+3 m, full wet −5.5..+1,
+      // MULTIPLY-darkened to 0.38× gray (0.38/0.37/0.35). Softer bands
+      // and mix-to-color tints were invisible under a bright sky. The
+      // band deliberately crosses the waterline: the submerged rim reads
+      // as wet sand through the shallows (pairs with the 0.28 roughness).
+      const wetBand = smoothstep(float(-7), float(-5.5), vShore)
+        .mul(float(1).sub(smoothstep(float(1), float(3), vShore)))
+        .mul(grain.mul(0.15).add(0.85))
+      ground = ground.mul(
+        mix(vec3(1, 1, 1), vec3(0.38, 0.37, 0.35), wetBand),
+      )
 
       ground = mix(ground, subalpine, subalpMask.mul(0.6))
       ground = mix(ground, rock, rockMask)

@@ -15,6 +15,8 @@ originals. Third-party assets used under license:
   https://sketchfab.com/3d-models/dc894acc16544bc69630e9a5232cf74c
 - **Boulders** — "Boulder 01" and "Namaqualand Boulder 02", Poly Haven, CC0.
 - **Spruce bark ("pine_bark")** — Poly Haven, CC0.
+- **Dock boards ("weathered_brown_planks")** — Poly Haven, CC0.
+  https://polyhaven.com/a/weathered_brown_planks
 - **Radio (M key)** — SomaFM (somafm.com), listener-supported,
   commercial-free internet radio. Streams play only on user request.
   If you enjoy the music, support them: https://somafm.com/support/
